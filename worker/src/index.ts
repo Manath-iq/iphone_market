@@ -9,7 +9,7 @@ import { serveMedia } from './media';
 import { createBot } from './bot';
 import { sendBuyRequest, sendWeeklyStats } from './notify';
 import { checkDeleted, importChannel, importReviews, type ReviewsMeta } from './importer';
-import { downloadPending } from './ingest';
+import { downloadPending, purgeSoldMedia } from './ingest';
 import { STORE } from './config';
 
 type Ctx = { Bindings: Env; Variables: { user: TgUser | null } };
@@ -118,6 +118,7 @@ app.post('/admin/import', async (c) => c.json(await importChannel(c.env, c.req.q
 app.post('/admin/media', async (c) => c.json(await downloadPending(c.env, 35)));
 app.post('/admin/reviews', async (c) => c.json(await importReviews(c.env)));
 app.post('/admin/check', async (c) => c.json(await checkDeleted(c.env)));
+app.post('/admin/purge', async (c) => c.json(await purgeSoldMedia(c.env, num(c.req.query('days')) ?? 7)));
 
 export default {
   fetch: app.fetch,
@@ -130,6 +131,7 @@ export default {
       (async () => {
         await checkDeleted(env);
         await downloadPending(env, 20);
+        await purgeSoldMedia(env);
         await env.DB.prepare('DELETE FROM events WHERE created_at < ?').bind(now() - 90 * 86400).run();
         await env.DB.prepare('DELETE FROM media WHERE listing_id IS NULL AND created_at < ?').bind(now() - 86400).run();
       })(),

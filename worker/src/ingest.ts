@@ -138,7 +138,8 @@ async function attachGroupMedia(env: Env, l: ListingRow) {
 export async function downloadPending(env: Env, limit = 30): Promise<{ done: number; remaining: number }> {
   const { results } = await env.DB.prepare(
     `SELECT id, source_channel, msg_id, kind, source, file_size FROM media
-     WHERE listing_id IS NOT NULL AND storage_key IS NULL ORDER BY listing_id DESC, position LIMIT ?`,
+     WHERE listing_id IS NOT NULL AND storage_key IS NULL AND listing_id NOT IN (SELECT id FROM listings WHERE status = 'sold')
+     ORDER BY listing_id DESC, position LIMIT ?`,
   )
     .bind(limit)
     .all<{ id: number; source_channel: string; msg_id: number; kind: 'photo' | 'video'; source: string; file_size: number | null }>();
@@ -171,7 +172,29 @@ export async function downloadPending(env: Env, limit = 30): Promise<{ done: num
     await env.DB.prepare('UPDATE media SET storage_key = ? WHERE id = ?').bind(stored, m.id).run();
   }
   const rest = await env.DB.prepare(
-    'SELECT COUNT(*) AS c FROM media WHERE listing_id IS NOT NULL AND storage_key IS NULL',
+    `SELECT COUNT(*) AS c FROM media WHERE listing_id IS NOT NULL AND storage_key IS NULL
+       AND listing_id NOT IN (SELECT id FROM listings WHERE status = 'sold')`,
   ).first<{ c: number }>();
   return { done, remaining: rest?.c ?? 0 };
+}
+
+/**
+ * Удаляет из хранилища фото и видео карточек, проданных больше days дней назад, чтобы KV не переполнялся.
+ * storage_key сбрасывается в NULL: если пост снова станет актуальным, файлы скачаются заново по file_id.
+ * limit держит число удалений в бесплатном лимите KV (1000 записей в день, удаление считается записью).
+ */
+export async function purgeSoldMedia(env: Env, days = 7, limit = 20): Promise<{ deleted: number }> {
+  const { results } = await env.DB.prepare(
+    `SELECT m.id, m.storage_key FROM media m JOIN listings l ON l.id = m.listing_id
+     WHERE l.status = 'sold' AND l.sold_at < ? AND m.storage_key IS NOT NULL AND m.storage_key != 'skip'
+     LIMIT ?`,
+  )
+    .bind(now() - days * 86400, limit)
+    .all<{ id: number; storage_key: string }>();
+  const store = kvMediaStore(env);
+  for (const m of results) {
+    await store.delete(m.storage_key);
+    await env.DB.prepare('UPDATE media SET storage_key = NULL WHERE id = ?').bind(m.id).run();
+  }
+  return { deleted: results.length };
 }

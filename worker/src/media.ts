@@ -1,10 +1,11 @@
 import type { Env } from './env';
 
-/** Хранилище медиа. Сейчас KV; для R2 достаточно другой реализации этих трёх методов. */
+/** Хранилище медиа. Сейчас KV; для R2 достаточно другой реализации этих методов. */
 export interface MediaStore {
   has(key: string): Promise<boolean>;
   put(key: string, body: ArrayBuffer, contentType: string): Promise<void>;
   get(key: string): Promise<{ body: ArrayBuffer; contentType: string } | null>;
+  delete(key: string): Promise<void>;
 }
 
 export const kvMediaStore = (env: Env): MediaStore => ({
@@ -19,6 +20,9 @@ export const kvMediaStore = (env: Env): MediaStore => ({
     const r = await env.MEDIA.getWithMetadata<{ ct: string }>(key, 'arrayBuffer');
     if (!r.value) return null;
     return { body: r.value, contentType: r.metadata?.ct ?? 'application/octet-stream' };
+  },
+  async delete(key) {
+    await env.MEDIA.delete(key);
   },
 });
 
