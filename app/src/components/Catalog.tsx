@@ -1,7 +1,8 @@
 import type { Facets, Listing } from '../../../shared/types';
 import { applyFilters, plural, sheetCount, SORT_LABELS, type Filters, type Sort } from '../filters';
 import { haptic } from '../tg';
-import { IconBell, IconChevronDown, IconFilter } from '../icons';
+import { IconChevronDown, IconFilter } from '../icons';
+import { Emoji } from './Emoji';
 import { Card, CardSkeleton } from './Card';
 
 interface Props {
@@ -81,7 +82,7 @@ export function Catalog({ items, facets, filters, setFilters, storeName, error, 
 
       {error && !items ? (
         <div class="empty">
-          <div class="empty-emoji">📡</div>
+          <Emoji name="retry" size={64} class="empty-emoji" />
           <div class="empty-title">Не удалось загрузить каталог</div>
           <div class="empty-text">Проверьте интернет и попробуйте ещё раз</div>
           <button class="btn-primary" onClick={onRetry}>
@@ -96,7 +97,7 @@ export function Catalog({ items, facets, filters, setFilters, storeName, error, 
         </div>
       ) : shown.length === 0 ? (
         <div class="empty">
-          <div class="empty-emoji">🔍</div>
+          <Emoji name="search" size={64} class="empty-emoji" />
           <div class="empty-title">Под фильтры ничего нет</div>
           <div class="empty-text">Сбросьте фильтры или подпишитесь — пришлём, как только появится</div>
           <div class="empty-actions">
@@ -119,7 +120,7 @@ export function Catalog({ items, facets, filters, setFilters, storeName, error, 
       {shown && shown.length > 0 && (
         <button class="promo" onClick={() => (haptic.tap(), onSubscribe(filters.family))}>
           <div class="promo-icon">
-            <IconBell size={22} />
+            <Emoji name="bell" size={30} />
           </div>
           <div class="promo-text">
             <b>Нет нужной модели?</b>

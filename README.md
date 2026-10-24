@@ -18,7 +18,7 @@
 
 | Папка | Что внутри |
 | --- | --- |
-| `app/` | Мини-апп: Vite + Preact, ~20 КБ gzip. Цвета из `themeParams`, во весь экран на телефонах |
+| `app/` | Мини-апп: Vite + Preact, ~22 КБ gzip + Lottie-плеер отдельным чанком. Цвета из `themeParams`, во весь экран на телефонах. Анимированные эмодзи из набора [RestrictedEmoji](https://t.me/addemoji/RestrictedEmoji) лежат в `app/public/emoji`, обновляются через `BOT_TOKEN=... node scripts/fetch-emoji.ts` |
 | `worker/` | Cloudflare Worker: бот, API, cron, раздача статики и медиа |
 | `shared/` | Парсер постов, разбор ленты `t.me/s`, типы. Тесты — на реальных постах канала (`shared/fixtures`) |
 | `scripts/import.ts` | Импорт истории с публичной ленты |

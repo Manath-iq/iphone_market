@@ -1,15 +1,16 @@
 import type { StoreInfo } from '../api';
 import { haptic, openTgLink } from '../tg';
-import { IconChevron, IconStar } from '../icons';
+import { IconChevron } from '../icons';
+import { Emoji, type EmojiName } from './Emoji';
 
 export function About({ store }: { store: StoreInfo | null }) {
   if (!store) return <div class="screen page" />;
   const { about, reviews } = store;
-  const rows: [string, string, string][] = [
-    ['📍', 'Город', about.city],
-    ['🚚', 'Доставка', about.delivery],
-    ['🛡️', 'Гарантия', about.warranty],
-    ['💳', 'Оплата', about.payment],
+  const rows: [EmojiName, string, string][] = [
+    ['map', 'Город', about.city],
+    ['car', 'Доставка', about.delivery],
+    ['check', 'Гарантия', about.warranty],
+    ['money', 'Оплата', about.payment],
   ];
   return (
     <div class="screen page">
@@ -25,7 +26,7 @@ export function About({ store }: { store: StoreInfo | null }) {
         <section class="group reviews">
           <button class="reviews-head" onClick={() => (haptic.tap(), openTgLink(reviews.url))}>
             <span class="row-icon star">
-              <IconStar size={18} />
+              <Emoji name="star" size={24} />
             </span>
             <div>
               <b>Отзывы покупателей</b>
@@ -52,7 +53,7 @@ export function About({ store }: { store: StoreInfo | null }) {
         <ul class="list info">
           {rows.map(([icon, label, value]) => (
             <li>
-              <span class="emoji">{icon}</span>
+              <Emoji name={icon} size={28} />
               <div>
                 <span class="muted">{label}</span>
                 {value}
@@ -64,14 +65,18 @@ export function About({ store }: { store: StoreInfo | null }) {
 
       <section class="group links">
         <button class="row" onClick={() => openTgLink(`https://t.me/${store.channel}`)}>
-          <span class="row-icon">📣</span>
+          <span class="row-icon">
+            <Emoji name="megaphone" size={24} />
+          </span>
           Канал @{store.channel}
           <span class="row-tail">
             <IconChevron size={16} />
           </span>
         </button>
         <button class="row" onClick={() => openTgLink(`https://t.me/${store.seller}`)}>
-          <span class="row-icon">💬</span>
+          <span class="row-icon">
+            <Emoji name="chat" size={24} />
+          </span>
           Написать продавцу
           <span class="row-tail">
             <IconChevron size={16} />

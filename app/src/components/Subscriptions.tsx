@@ -4,7 +4,8 @@ import { formatPrice, formatStorage } from '../../../shared/parser';
 import { api } from '../api';
 import { ALL_FAMILIES, STORAGE_OPTIONS } from '../filters';
 import { haptic, inTelegram, requestWriteAccess } from '../tg';
-import { IconBell, IconTrash } from '../icons';
+import { IconTrash } from '../icons';
+import { Emoji } from './Emoji';
 
 interface Props {
   preset: string | null;
@@ -59,9 +60,7 @@ export function Subscriptions({ preset, available, toast }: Props) {
   return (
     <div class="screen page">
       <div class="page-hero">
-        <div class="hero-icon">
-          <IconBell size={28} />
-        </div>
+        <Emoji name="bell" size={84} loop class="hero-emoji" />
         <h1>Сообщить, когда появится</h1>
         <p>Выберите модель — бот пришлёт сообщение, как только такой телефон появится в наличии.</p>
       </div>

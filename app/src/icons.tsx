@@ -83,8 +83,3 @@ export const IconBattery = (p: P) => (
     <path d="M21.5 11v2" />
   </S>
 );
-export const IconStar = (p: P) => (
-  <S {...p}>
-    <path d="M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z" />
-  </S>
-);

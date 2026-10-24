@@ -4,6 +4,7 @@ import { formatPrice, formatStorage } from '../../../shared/parser';
 import { batteryTone, isNew } from '../filters';
 import { api } from '../api';
 import { haptic, inTelegram, tg, openTgLink } from '../tg';
+import { Emoji } from './Emoji';
 import { IconCheck, IconChevron, IconClose, IconInfo, IconPaper, IconPlay, IconShare } from '../icons';
 
 interface Props {
@@ -72,7 +73,7 @@ export function Detail({ id, preview, botUsername, onClose, onBuy, toast }: Prop
 
       {missing && !l ? (
         <div class="empty">
-          <div class="empty-emoji">🤷</div>
+          <Emoji name="shrug" size={72} class="empty-emoji" />
           <div class="empty-title">Этот телефон уже продан</div>
           <button class="btn-primary" onClick={onClose}>
             Смотреть другие
@@ -81,7 +82,12 @@ export function Detail({ id, preview, botUsername, onClose, onBuy, toast }: Prop
       ) : l ? (
         <div class="detail-body">
           <div class="detail-head">
-            {isNew(l) && <span class="badge-new inline">Новое</span>}
+            {isNew(l) && (
+              <span class="badge-new inline">
+                <Emoji name="fire" size={15} />
+                Новое
+              </span>
+            )}
             {sold && <span class="badge-sold">Продан</span>}
             <h1>
               iPhone {l.family ?? l.model_raw}

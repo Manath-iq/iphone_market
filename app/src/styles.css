@@ -377,6 +377,8 @@ s {
   display: inline-flex;
   align-items: center;
   box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 40%, transparent), inset 0 0.5px 0 rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 .badge-new.inline {
   position: static;
@@ -523,10 +525,9 @@ s {
   border-radius: 14px;
   display: grid;
   place-items: center;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-soft);
   flex: none;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  box-shadow: inset 0 0.5px 0 var(--glass-edge);
 }
 .promo-text {
   display: flex;
@@ -1175,17 +1176,6 @@ s {
   color: var(--hint);
   max-width: 320px;
 }
-.hero-icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 20px;
-  margin: 0 auto 14px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: radial-gradient(120% 120% at 20% 0%, #ffb37a 0%, var(--accent) 50%, #c2310a 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 8px 24px color-mix(in srgb, var(--accent) 30%, transparent);
-}
 .field {
   display: flex;
   align-items: center;
@@ -1233,10 +1223,6 @@ s {
 .info .muted {
   font-size: 12px;
 }
-.info .emoji {
-  font-size: 20px;
-  line-height: 1.2;
-}
 .reviews {
   background: var(--surface);
   border-radius: 20px;
@@ -1281,6 +1267,40 @@ s {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* ——— Анимированные эмодзи (Lottie) ——— */
+.emoji-anim {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  line-height: 1;
+  vertical-align: middle;
+}
+.emoji-fallback,
+.emoji-player {
+  grid-area: 1 / 1;
+}
+.emoji-player {
+  position: absolute;
+  inset: 0;
+}
+.emoji-player svg {
+  display: block;
+}
+.emoji-anim.ready .emoji-fallback {
+  visibility: hidden;
+}
+.empty-emoji {
+  display: inline-grid;
+}
+.hero-emoji {
+  margin: 0 auto 10px;
+  display: grid;
+}
+.badge-new .emoji-anim {
+  margin: 0 3px 0 -3px;
 }
 
 /* ——— Тост ——— */

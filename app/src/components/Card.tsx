@@ -1,6 +1,7 @@
 import type { Listing } from '../../../shared/types';
 import { formatPrice, formatStorage } from '../../../shared/parser';
 import { batteryTone, isNew } from '../filters';
+import { Emoji } from './Emoji';
 
 export function Card({ l, onOpen, index }: { l: Listing; onOpen: (l: Listing) => void; index: number }) {
   return (
@@ -15,9 +16,16 @@ export function Card({ l, onOpen, index }: { l: Listing; onOpen: (l: Listing) =>
             onLoad={(e) => (e.currentTarget as HTMLImageElement).classList.add('loaded')}
           />
         ) : (
-          <div class="card-photo-empty">📱</div>
+          <div class="card-photo-empty">
+            <Emoji name="phone" size={48} />
+          </div>
         )}
-        {isNew(l) && <span class="badge-new">Новое</span>}
+        {isNew(l) && (
+          <span class="badge-new">
+            <Emoji name="fire" size={15} />
+            Новое
+          </span>
+        )}
       </div>
       <div class="card-body">
         <div class="card-title">
