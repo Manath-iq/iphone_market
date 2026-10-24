@@ -1,0 +1,26 @@
+{
+  "name": "raxi-catalog",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:app": "vite --config app/vite.config.ts",
+    "build": "vite build --config app/vite.config.ts",
+    "test": "vitest run",
+    "deploy": "npm run build && wrangler deploy --config worker/wrangler.toml",
+    "db:migrate": "wrangler d1 migrations apply raxi-catalog-db --remote --config worker/wrangler.toml",
+    "import": "node scripts/import.ts"
+  },
+  "dependencies": {
+    "grammy": "^1.46.0",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261024.1",
+    "@preact/preset-vite": "^2.10.6",
+    "preact": "^10.29.8",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.152.0"
+  }
+}
