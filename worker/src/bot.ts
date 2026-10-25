@@ -1,6 +1,6 @@
-import { Bot, InlineKeyboard, type Context } from 'grammy';
+import { Bot, InlineKeyboard, type CommandContext, type Context, type NextFunction } from 'grammy';
 import type { Message, UserFromGetMe } from 'grammy/types';
-import { formatPrice, listingTitle } from '../../shared/parser';
+import { formatPrice, listingTitle, plural } from '../../shared/parser';
 import type { Env } from './env';
 import { adminIds, now } from './env';
 import type { ListingRow } from './db';
@@ -67,86 +67,139 @@ export function createBot({ env, origin, waitUntil }: Deps) {
       }
     }
     // качаем файлы в фоне, чтобы быстро ответить Telegram
-    waitUntil(downloadPending(env, 12));
+    waitUntil(downloadPending(env, 10));
   }
 
   bot.on('channel_post', (ctx) => handleChannelMessage(ctx.channelPost, false));
   bot.on('edited_channel_post', (ctx) => handleChannelMessage(ctx.editedChannelPost, true));
+
+  const esc = (t: string) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
+  /** админские команды: не-админу отдаём то же, что на любое сообщение, — кнопку каталога */
+  const adminOnly =
+    (fn: (ctx: CommandContext<Context>) => Promise<unknown>) =>
+    (ctx: CommandContext<Context>, next: NextFunction) =>
+      isAdmin(ctx) ? fn(ctx) : next();
+  const ADMIN_HELP = [
+    '<b>Команды продавца</b>',
+    '/list — что сейчас в каталоге',
+    '/stats — статистика за 7 дней',
+    '/sold 12 — снять как проданный',
+    '/hide 12 — скрыть',
+    '/show 12 — вернуть в каталог',
+    '',
+    'Новые посты с #АКТУАЛЬНО_RaXi попадают в каталог сами, а замена хэштега на «Продано» снимает карточку.',
+  ].join('\n');
 
   // ——— Покупатель ———
   bot.command('start', async (ctx) => {
     // ссылка «Поделиться» из карточки: t.me/<бот>?start=l_12
     const shared = ctx.match.match(/^l_(\d+)$/);
     if (shared) {
-      const l = await env.DB.prepare(`SELECT * FROM listings WHERE id = ? AND status = 'active'`).bind(+shared[1]).first<ListingRow>();
-      if (l) {
-        return ctx.reply(`📱 <b>${listingTitle(l)}</b>${l.price_rub ? ' — ' + formatPrice(l.price_rub) : ''}`, {
+      const l = await env.DB.prepare('SELECT * FROM listings WHERE id = ?').bind(+shared[1]).first<ListingRow>();
+      if (l?.status === 'active') {
+        return ctx.reply(`📱 <b>${esc(listingTitle(l))}</b>${l.price_rub ? ' — ' + formatPrice(l.price_rub) : ''}`, {
           parse_mode: 'HTML',
           reply_markup: new InlineKeyboard().webApp('Открыть карточку', `${origin}/?l=${l.id}`).row().webApp('Весь каталог', origin),
         });
       }
+      if (l) {
+        await ctx.reply(`${esc(listingTitle(l))} уже продан 🤷 Посмотрите, что есть сейчас:`, { reply_markup: catalogKb() });
+        return;
+      }
     }
+    const count = await env.DB.prepare(`SELECT COUNT(*) AS c FROM listings WHERE status = 'active'`).first<{ c: number }>();
+    const n = count?.c ?? 0;
     await ctx.reply(
-      `Здравствуйте! Это каталог <b>${STORE.name}</b> — только телефоны, которые есть в наличии прямо сейчас.\n\nВыберите модель, посмотрите фото и характеристики и напишите продавцу в один тап.`,
-      { parse_mode: 'HTML', reply_markup: catalogKb() },
+      [
+        `Здравствуйте! Это каталог <b>${STORE.name}</b> 🍏`,
+        '',
+        n ? `Сейчас в наличии <b>${n}</b> ${plural(n, 'телефон', 'телефона', 'телефонов')} — только то, что можно купить прямо сейчас.` : 'Сейчас всё раскупили, но новые телефоны появляются почти каждый день.',
+        '',
+        '• фото, видео и честное описание каждого',
+        '• фильтры по модели, памяти, цене и АКБ',
+        '• «Купить» — и вы сразу в чате с продавцом',
+        '• подписка: напишу, когда появится нужная модель',
+      ].join('\n'),
+      {
+        parse_mode: 'HTML',
+        reply_markup: new InlineKeyboard().webApp('📱 Открыть каталог', origin).row().webApp('🔔 Сообщить о поступлении', `${origin}/?tab=subs`),
+      },
     );
-    if (isAdmin(ctx)) {
-      await ctx.reply('Вы админ. Команды: /list, /stats, /sold id, /hide id, /show id');
-    }
+    if (isAdmin(ctx)) await ctx.reply(ADMIN_HELP, { parse_mode: 'HTML' });
   });
 
   // ——— Продавец ———
-  bot.command('list', async (ctx) => {
-    if (!isAdmin(ctx)) return;
-    const { results } = await env.DB.prepare(
-      `SELECT * FROM listings WHERE status = 'active' ORDER BY created_at DESC`,
-    ).all<ListingRow>();
-    if (!results.length) return ctx.reply('Активных карточек нет.');
-    const lines = results.map((l) => {
-      const days = Math.max(0, Math.floor((now() - l.created_at) / 86400));
-      return `<code>${l.id}</code> ${listingTitle(l)} — ${l.price_rub ? formatPrice(l.price_rub) : '?'} · ${days} дн.${l.parse_ok ? '' : ' ⚠️'}`;
-    });
-    await ctx.reply(`<b>В наличии: ${results.length}</b>\n\n${lines.join('\n')}`, { parse_mode: 'HTML' });
-  });
+  bot.command(
+    'help',
+    adminOnly((ctx) => ctx.reply(ADMIN_HELP, { parse_mode: 'HTML' })),
+  );
 
-  bot.command('stats', async (ctx) => {
-    if (!isAdmin(ctx)) return;
-    await ctx.reply(await statsText(env), { parse_mode: 'HTML' });
-  });
+  bot.command(
+    'list',
+    adminOnly(async (ctx) => {
+      const { results } = await env.DB.prepare(`SELECT * FROM listings WHERE status = 'active' ORDER BY created_at DESC`).all<ListingRow>();
+      if (!results.length) return ctx.reply('Сейчас в каталоге пусто.');
+      const lines = results.map((l) => {
+        const days = Math.max(0, Math.floor((now() - l.created_at) / 86400));
+        const age = days === 0 ? 'сегодня' : `${days} ${plural(days, 'день', 'дня', 'дней')}`;
+        return `<code>${l.id}</code> · <a href="${l.post_url}">${esc(listingTitle(l))}</a> — ${l.price_rub ? formatPrice(l.price_rub) : '?'} · ${age}${l.parse_ok ? '' : ' ⚠️'}`;
+      });
+      const warn = results.some((l) => !l.parse_ok) ? '\n\n⚠️ — пост разобран не полностью, проверьте карточку' : '';
+      await ctx.reply(`<b>В наличии: ${results.length}</b>\n\n${lines.join('\n')}${warn}`, {
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+        reply_markup: catalogKb(),
+      });
+    }),
+  );
+
+  bot.command(
+    'stats',
+    adminOnly(async (ctx) => ctx.reply(await statsText(env), { parse_mode: 'HTML' })),
+  );
 
   for (const [cmd, status, done] of [
-    ['sold', 'sold', 'снята как проданная'],
-    ['hide', 'hidden', 'скрыта'],
+    ['sold', 'sold', 'снят как проданный'],
+    ['hide', 'hidden', 'скрыт из каталога'],
     ['show', 'active', 'снова в каталоге'],
   ] as const) {
-    bot.command(cmd, async (ctx) => {
-      if (!isAdmin(ctx)) return;
-      const id = parseInt(ctx.match, 10);
-      if (!id) return ctx.reply(`Укажите id карточки: /${cmd} 12. Список — /list`);
-      const l = await setStatus(env, id, status);
-      await ctx.reply(l ? `${listingTitle(l)} — ${done}.` : 'Карточка не найдена.');
-    });
+    bot.command(
+      cmd,
+      adminOnly(async (ctx) => {
+        const id = parseInt(ctx.match, 10);
+        if (!id) return ctx.reply(`Укажите номер карточки: /${cmd} 12. Номера — в /list`);
+        const l = await setStatus(env, id, status);
+        await ctx.reply(l ? `${listingTitle(l)} — ${done}.` : 'Карточка с таким номером не найдена.');
+      }),
+    );
   }
 
-  bot.callbackQuery(/^(ok|hide):(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^(ok|hide|show):(\d+)$/, async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCallbackQuery();
     const [, action, idStr] = ctx.match;
     const id = +idStr;
+    const open = () => new InlineKeyboard().webApp('Открыть в каталоге', `${origin}/?l=${id}`);
+    let kb: InlineKeyboard;
     if (action === 'ok') {
       await env.DB.prepare('UPDATE listings SET confirmed = 1, parse_ok = 1 WHERE id = ?').bind(id).run();
       await ctx.answerCallbackQuery('Отлично, карточка в каталоге');
-    } else {
+      kb = open().row().text('🙈 Скрыть', `hide:${id}`);
+    } else if (action === 'hide') {
       await setStatus(env, id, 'hidden');
-      await ctx.answerCallbackQuery('Скрыто. Вернуть: /show ' + id);
+      await ctx.answerCallbackQuery('Скрыто из каталога');
+      kb = new InlineKeyboard().text('↩️ Вернуть в каталог', `show:${id}`);
+    } else {
+      await setStatus(env, id, 'active');
+      await ctx.answerCallbackQuery('Снова в каталоге');
+      kb = open().row().text('🙈 Скрыть', `hide:${id}`);
     }
-    await ctx.editMessageReplyMarkup({
-      reply_markup: new InlineKeyboard().webApp(action === 'ok' ? '✅ Подтверждено · открыть' : '🙈 Скрыто · открыть', `${origin}/?l=${id}`),
-    }).catch(() => {});
+    await ctx.editMessageReplyMarkup({ reply_markup: kb }).catch(() => {});
   });
 
   // Всё остальное — кнопка каталога
   bot.on('message', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
+    if (isAdmin(ctx) && ctx.message.text?.startsWith('/')) return ctx.reply(ADMIN_HELP, { parse_mode: 'HTML' });
     await ctx.reply('Все телефоны в наличии — в каталоге 👇', { reply_markup: catalogKb() });
   });
 

@@ -36,8 +36,21 @@ export function Emoji({ name, size = 24, loop = false, class: cls = '' }: Props)
   const box = useRef<HTMLSpanElement>(null);
   const anim = useRef<AnimationItem | null>(null);
   const [ready, setReady] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  // грузим анимацию, только когда эмодзи рядом с экраном
+  useEffect(() => {
+    const el = box.current;
+    if (!el || !('IntersectionObserver' in window)) return setVisible(true);
+    const io = new IntersectionObserver((e) => e.some((x) => x.isIntersecting) && (setVisible(true), io.disconnect()), {
+      rootMargin: '200px',
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   useEffect(() => {
+    if (!visible) return;
     let alive = true;
     Promise.all([loadPlayer(), loadData(name)])
       .then(([lottie, json]) => {
@@ -59,7 +72,7 @@ export function Emoji({ name, size = 24, loop = false, class: cls = '' }: Props)
       anim.current?.destroy();
       anim.current = null;
     };
-  }, [name, loop]);
+  }, [name, loop, visible]);
 
   const replay = () => {
     const a = anim.current;

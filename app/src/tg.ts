@@ -48,7 +48,8 @@ const w = (window as unknown as { Telegram?: { WebApp?: WebApp } }).Telegram?.We
 export const inTelegram = !!w?.initData;
 export const tg = w;
 export const initData = w?.initData ?? '';
-export const startParam = w?.initDataUnsafe.start_param ?? new URLSearchParams(location.search).get('l') ?? '';
+/** start_param из ссылки t.me/<бот>/<app>?startapp=… */
+export const startParam = w?.initDataUnsafe.start_param ?? '';
 export const supports = (v: string) => !!w && inTelegram && w.isVersionAtLeast(v);
 
 export function initTelegram() {
@@ -102,4 +103,23 @@ export async function copyText(text: string): Promise<boolean> {
     ta.remove();
     return ok;
   }
+}
+
+/**
+ * Стек вложенных «назад»: полноэкранная галерея, лист и т. п. регистрируют сюда закрытие,
+ * и кнопка «Назад» Telegram сначала закрывает самый верхний слой.
+ */
+const backStack: (() => void)[] = [];
+export function pushBack(fn: () => void) {
+  backStack.push(fn);
+  return () => {
+    const i = backStack.lastIndexOf(fn);
+    if (i >= 0) backStack.splice(i, 1);
+  };
+}
+export function popBack(): boolean {
+  const fn = backStack.pop();
+  if (!fn) return false;
+  fn();
+  return true;
 }

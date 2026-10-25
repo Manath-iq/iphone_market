@@ -115,7 +115,7 @@ app.use('/admin/*', async (c, next) => {
   await next();
 });
 app.post('/admin/import', async (c) => c.json(await importChannel(c.env, c.req.query('channel') || STORE.channel, num(c.req.query('pages')) ?? 3)));
-app.post('/admin/media', async (c) => c.json(await downloadPending(c.env, 35)));
+app.post('/admin/media', async (c) => c.json(await downloadPending(c.env, 20)));
 app.post('/admin/reviews', async (c) => c.json(await importReviews(c.env)));
 app.post('/admin/check', async (c) => c.json(await checkDeleted(c.env)));
 app.post('/admin/purge', async (c) => c.json(await purgeSoldMedia(c.env, num(c.req.query('days')) ?? 7)));
@@ -129,8 +129,9 @@ export default {
     }
     ctx.waitUntil(
       (async () => {
-        await checkDeleted(env);
-        await downloadPending(env, 20);
+        // бесплатный тариф — 50 подзапросов на запуск: 15 проверок постов + до 24 запросов на 12 файлов
+        await checkDeleted(env, 15);
+        await downloadPending(env, 12);
         await purgeSoldMedia(env);
         await env.DB.prepare('DELETE FROM events WHERE created_at < ?').bind(now() - 90 * 86400).run();
         await env.DB.prepare('DELETE FROM media WHERE listing_id IS NULL AND created_at < ?').bind(now() - 86400).run();

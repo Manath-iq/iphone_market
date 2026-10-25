@@ -8,26 +8,32 @@ import { IconTrash } from '../icons';
 import { Emoji } from './Emoji';
 
 interface Props {
-  preset: string | null;
+  /** n меняется при каждом переходе сюда, чтобы модель выбиралась даже повторно */
+  preset: { family: string | null; n: number };
   available: string[];
   toast: (msg: string) => void;
 }
 
 export function Subscriptions({ preset, available, toast }: Props) {
-  const [family, setFamily] = useState<string | null>(preset);
+  const [family, setFamily] = useState<string | null>(preset.family);
+  const [showAll, setShowAll] = useState(false);
   const [storage, setStorage] = useState<number | null>(null);
   const [maxPrice, setMaxPrice] = useState('');
   const [subs, setSubs] = useState<Subscription[] | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => setFamily(preset), [preset]);
+  useEffect(() => {
+    if (preset.family) setFamily(preset.family);
+    if (preset.family && !available.includes(preset.family)) setShowAll(true);
+  }, [preset.n]);
   useEffect(() => {
     if (inTelegram) api.subscriptions().then(setSubs).catch(() => setSubs([]));
     else setSubs([]);
   }, []);
 
-  // сначала те модели, что сейчас есть, потом остальные
-  const families = [...available, ...ALL_FAMILIES.filter((f) => !available.includes(f))];
+  // сначала модели, которые сейчас есть, остальные — по кнопке
+  const others = ALL_FAMILIES.filter((f) => !available.includes(f));
+  const families = showAll || !available.length ? [...available, ...others] : available;
 
   const save = async () => {
     if (!family) return;
@@ -75,14 +81,20 @@ export function Subscriptions({ preset, available, toast }: Props) {
               {f}
             </button>
           ))}
+          {!showAll && available.length > 0 && (
+            <button class="chip ghost" onClick={() => (haptic.select(), setShowAll(true))}>
+              Другие модели · {others.length}
+            </button>
+          )}
         </div>
+        {available.length > 0 && <p class="group-foot">Точкой отмечены модели, которые есть в наличии прямо сейчас.</p>}
       </section>
 
       <section class="group">
         <h3>Память</h3>
-        <div class="segmented">
+        <div class="chips wrap">
           {[null, ...STORAGE_OPTIONS].map((gb) => (
-            <button class={storage === gb ? 'on' : ''} onClick={() => (haptic.select(), setStorage(gb))}>
+            <button class={`chip ${storage === gb ? 'on' : ''}`} onClick={() => (haptic.select(), setStorage(gb))}>
               {gb ? formatStorage(gb) : 'Любая'}
             </button>
           ))}

@@ -143,3 +143,12 @@ export const formatStorage = (gb: number) => (gb >= 1024 ? `${gb / 1024}TB` : `$
 
 export const listingTitle = (l: { family: string | null; model_raw: string | null; storage_gb: number | null }) =>
   `${l.family ? 'iPhone ' + l.family : l.model_raw ?? 'Телефон'}${l.storage_gb ? ' ' + formatStorage(l.storage_gb) : ''}`;
+
+/** Склонение: plural(5, 'телефон', 'телефона', 'телефонов') → «телефонов» */
+export function plural(n: number, one: string, few: string, many: string) {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}

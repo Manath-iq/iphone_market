@@ -134,14 +134,22 @@ async function attachGroupMedia(env: Env, l: ListingRow) {
     .run();
 }
 
-/** Скачать в хранилище файлы привязанных карточек. limit — чтобы уложиться в лимит подзапросов воркера. */
+/**
+ * Скачать в хранилище файлы привязанных карточек. limit — чтобы уложиться в лимит подзапросов воркера
+ * (на файл из Telegram уходит 2 запроса). Файлы сначала «захватываются» одним UPDATE, поэтому параллельные
+ * вызовы от апдейтов одного альбома не качают одно и то же; зависший захват освобождается через 5 минут.
+ */
 export async function downloadPending(env: Env, limit = 30): Promise<{ done: number; remaining: number }> {
+  const ts = now();
   const { results } = await env.DB.prepare(
-    `SELECT id, source_channel, msg_id, kind, source, file_size FROM media
-     WHERE listing_id IS NOT NULL AND storage_key IS NULL AND listing_id NOT IN (SELECT id FROM listings WHERE status = 'sold')
-     ORDER BY listing_id DESC, position LIMIT ?`,
+    `UPDATE media SET claimed_at = ? WHERE id IN (
+       SELECT id FROM media
+       WHERE listing_id IS NOT NULL AND storage_key IS NULL AND (claimed_at IS NULL OR claimed_at < ?)
+         AND listing_id NOT IN (SELECT id FROM listings WHERE status = 'sold')
+       ORDER BY listing_id DESC, position LIMIT ?)
+     RETURNING id, source_channel, msg_id, kind, source, file_size`,
   )
-    .bind(limit)
+    .bind(ts, ts - 300, limit)
     .all<{ id: number; source_channel: string; msg_id: number; kind: 'photo' | 'video'; source: string; file_size: number | null }>();
   const store = kvMediaStore(env);
   let done = 0;
@@ -194,7 +202,7 @@ export async function purgeSoldMedia(env: Env, days = 7, limit = 20): Promise<{ 
   const store = kvMediaStore(env);
   for (const m of results) {
     await store.delete(m.storage_key);
-    await env.DB.prepare('UPDATE media SET storage_key = NULL WHERE id = ?').bind(m.id).run();
+    await env.DB.prepare('UPDATE media SET storage_key = NULL, claimed_at = NULL WHERE id = ?').bind(m.id).run();
   }
   return { deleted: results.length };
 }

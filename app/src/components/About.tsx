@@ -2,6 +2,7 @@ import type { StoreInfo } from '../api';
 import { haptic, openTgLink } from '../tg';
 import { IconChevron } from '../icons';
 import { Emoji, type EmojiName } from './Emoji';
+import { Img } from './Img';
 
 export function About({ store }: { store: StoreInfo | null }) {
   if (!store) return <div class="screen page" />;
@@ -38,7 +39,7 @@ export function About({ store }: { store: StoreInfo | null }) {
             <div class="review-strip">
               {reviews.photos.map((src) => (
                 <button class="review-shot" onClick={() => openTgLink(reviews.url)}>
-                  <img src={src} alt="Отзыв" loading="lazy" />
+                  <Img src={src} alt="Отзыв покупателя" />
                 </button>
               ))}
             </div>

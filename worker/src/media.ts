@@ -29,32 +29,36 @@ export const kvMediaStore = (env: Env): MediaStore => ({
 /** Bot API отдаёт файлы до 20 МБ */
 export const TG_FILE_LIMIT = 20 * 1024 * 1024;
 
-/** Отдать медиа с долгим кэшем и поддержкой Range (без него iOS не играет видео) */
+/**
+ * Отдать медиа с долгим кэшем и поддержкой Range (без него iOS не играет видео).
+ * Целый файл кладётся в edge-кэш, и запросы кусочков видео режутся уже из кэша, а не читают KV каждый раз.
+ */
 export async function serveMedia(env: Env, key: string, req: Request): Promise<Response> {
   const cache = caches.default;
-  const range = req.headers.get('range');
-  if (!range) {
-    const hit = await cache.match(req);
-    if (hit) return hit;
-  }
-  const obj = await kvMediaStore(env).get(key);
-  if (!obj) return new Response('not found', { status: 404 });
-  const headers = {
-    'content-type': obj.contentType,
-    'cache-control': 'public, max-age=31536000, immutable',
-    'accept-ranges': 'bytes',
-  };
-  const size = obj.body.byteLength;
-  const m = range?.match(/bytes=(\d*)-(\d*)/);
-  if (m) {
-    const start = m[1] ? +m[1] : size - +m[2];
-    const end = m[1] && m[2] ? Math.min(+m[2], size - 1) : size - 1;
-    return new Response(obj.body.slice(start, end + 1), {
-      status: 206,
-      headers: { ...headers, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': String(end - start + 1) },
+  const cacheKey = new Request(new URL(req.url).toString(), { method: 'GET' });
+  let full = await cache.match(cacheKey);
+  if (!full) {
+    const obj = await kvMediaStore(env).get(key);
+    if (!obj) return new Response('not found', { status: 404 });
+    full = new Response(obj.body, {
+      headers: {
+        'content-type': obj.contentType,
+        'content-length': String(obj.body.byteLength),
+        'cache-control': 'public, max-age=31536000, immutable',
+        'accept-ranges': 'bytes',
+      },
     });
+    await cache.put(cacheKey, full.clone());
   }
-  const res = new Response(obj.body, { headers: { ...headers, 'content-length': String(size) } });
-  await cache.put(req, res.clone());
-  return res;
+  const m = req.headers.get('range')?.match(/bytes=(\d*)-(\d*)/);
+  if (!m) return full;
+  const body = await full.arrayBuffer();
+  const size = body.byteLength;
+  const start = m[1] ? +m[1] : Math.max(0, size - +m[2]);
+  const end = m[1] && m[2] ? Math.min(+m[2], size - 1) : size - 1;
+  if (start >= size) return new Response(null, { status: 416, headers: { 'content-range': `bytes */${size}` } });
+  const headers = new Headers(full.headers);
+  headers.set('content-range', `bytes ${start}-${end}/${size}`);
+  headers.set('content-length', String(end - start + 1));
+  return new Response(body.slice(start, end + 1), { status: 206, headers });
 }

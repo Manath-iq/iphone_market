@@ -1,4 +1,4 @@
-import { ACTIVE_TAG } from '../../shared/parser';
+import { ACTIVE_TAG, plural } from '../../shared/parser';
 import { embedHasPost, parseFeed } from '../../shared/scrape';
 import type { Env } from './env';
 import { now } from './env';
@@ -89,7 +89,7 @@ export async function importReviews(env: Env, channel = STORE.reviewsChannel): P
   const page = await pageRes.text();
   // t.me отдаёт счётчик по-английски: «10 subscribers»
   const subsNum = page.match(/<div class="tgme_page_extra">([\d\s]+)/)?.[1]?.replace(/\s/g, '');
-  const subs = subsNum ? `${subsNum} ${pluralRu(+subsNum, 'подписчик', 'подписчика', 'подписчиков')}` : null;
+  const subs = subsNum ? `${subsNum} ${plural(+subsNum, 'подписчик', 'подписчика', 'подписчиков')}` : null;
   const title = page.match(/<meta property="og:title" content="([^"]+)"/)?.[1] ?? 'Отзывы';
   const photos = posts
     .flatMap((p) => p.media.filter((m) => m.kind === 'photo'))
@@ -109,12 +109,4 @@ export async function importReviews(env: Env, channel = STORE.reviewsChannel): P
   const meta: ReviewsMeta = { url: `https://t.me/${channel}`, title, subscribers: subs, photos: keys, updated_at: now() };
   await env.MEDIA.put('meta:reviews', JSON.stringify(meta));
   return meta;
-}
-
-function pluralRu(n: number, one: string, few: string, many: string) {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
 }

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Facets, Listing } from '../../shared/types';
+import { formatPrice, listingTitle } from '../../shared/parser';
 import { api, type StoreInfo } from './api';
 import { EMPTY, type Filters } from './filters';
-import { copyText, haptic, inTelegram, openTgLink, startParam, tg } from './tg';
+import { copyText, haptic, inTelegram, openTgLink, popBack, startParam, tg } from './tg';
 import { Catalog } from './components/Catalog';
 import { FilterSheet } from './components/FilterSheet';
 import { Detail } from './components/Detail';
@@ -13,6 +14,14 @@ import { IconBell, IconGrid, IconStore } from './icons';
 type Tab = 'catalog' | 'subs' | 'about';
 const BOT_USERNAME = 'iphone_marketraxi_bot';
 const FILTERS_KEY = 'raxi:filters';
+/** через сколько секунд после ухода из приложения перезапрашивать каталог */
+const STALE_SEC = 60;
+
+/** ?tab=subs из кнопки бота «Сообщить о поступлении» или startapp=subs */
+const initialTab: Tab = (() => {
+  const t = new URLSearchParams(location.search).get('tab') ?? startParam;
+  return t === 'subs' || t === 'about' ? t : 'catalog';
+})();
 
 function loadFilters(): Filters {
   try {
@@ -29,15 +38,18 @@ export function App() {
   const [error, setError] = useState(false);
   const [filters, setFiltersRaw] = useState<Filters>(loadFilters);
   const [sheet, setSheet] = useState(false);
-  const [tab, setTab] = useState<Tab>('catalog');
+  const [tab, setTab] = useState<Tab>(initialTab);
+  // вкладки монтируются при первом заходе — чтобы не грузить их картинки и анимации заранее
+  const [visited, setVisited] = useState<Set<Tab>>(() => new Set(['catalog', initialTab]));
   const [detailId, setDetailId] = useState<number | null>(() => {
-    const m = startParam.match(/(\d+)/);
+    const m = startParam.match(/^l?_?(\d+)$/) ?? new URLSearchParams(location.search).get('l')?.match(/^(\d+)$/);
     return m ? +m[1] : null;
   });
-  const [subPreset, setSubPreset] = useState<string | null>(null);
+  const [subPreset, setSubPreset] = useState<{ family: string | null; n: number }>({ family: null, n: 0 });
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimer = useRef<number>();
   const scrollByTab = useRef<Record<Tab, number>>({ catalog: 0, subs: 0, about: 0 });
+  const loadedAt = useRef(0);
 
   const setFilters = (f: Filters) => {
     setFiltersRaw(f);
@@ -49,13 +61,17 @@ export function App() {
   const toast = (msg: string) => {
     setToastMsg(msg);
     clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToastMsg(null), 2600);
+    toastTimer.current = window.setTimeout(() => setToastMsg(null), 2800);
   };
 
   const load = () => {
     setError(false);
-    Promise.all([api.listings(), api.facets()])
-      .then(([l, f]) => (setItems(l), setFacets(f)))
+    return Promise.all([api.listings(), api.facets()])
+      .then(([l, f]) => {
+        setItems(l);
+        setFacets(f);
+        loadedAt.current = Date.now();
+      })
       .catch(() => setError(true));
   };
 
@@ -63,6 +79,13 @@ export function App() {
     load();
     api.store().then(setStore).catch(() => {});
     api.event('app_open');
+    // вернулись в мини-апп через минуту и больше — тихо обновить каталог (вдруг что-то продали)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && Date.now() - loadedAt.current > STALE_SEC * 1000) load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    if (inTelegram) tg!.onEvent('activated', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   // если выбранной модели больше нет в наличии — сбросить чип
@@ -74,18 +97,21 @@ export function App() {
     if (t === tab) return window.scrollTo({ top: 0, behavior: 'smooth' });
     haptic.select();
     scrollByTab.current[tab] = window.scrollY;
+    setVisited((v) => (v.has(t) ? v : new Set(v).add(t)));
     setTab(t);
     requestAnimationFrame(() => window.scrollTo(0, scrollByTab.current[t] ?? 0));
   };
 
   const openSubscribe = (family: string | null) => {
-    setSubPreset(family);
+    setSubPreset((p) => ({ family, n: p.n + 1 }));
+    setSheet(false);
     setDetailId(null);
     goTab('subs');
   };
 
-  // Кнопка «Назад» Telegram: карточка → каталог (фильтры и прокрутка сохраняются), вкладка → каталог
+  // «Назад» (Telegram, Esc): верхний слой → лист → карточка → вкладка каталога
   const back = () => {
+    if (popBack()) return;
     if (sheet) return setSheet(false);
     if (detailId !== null) return setDetailId(null);
     if (tab !== 'catalog') goTab('catalog');
@@ -94,10 +120,15 @@ export function App() {
   backRef.current = back;
   const canGoBack = sheet || detailId !== null || tab !== 'catalog';
   useEffect(() => {
-    if (!inTelegram || !tg!.isVersionAtLeast('6.1')) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && backRef.current();
+    window.addEventListener('keydown', onKey);
+    if (!inTelegram || !tg!.isVersionAtLeast('6.1')) return () => window.removeEventListener('keydown', onKey);
     const handler = () => backRef.current();
     tg!.BackButton.onClick(handler);
-    return () => tg!.BackButton.offClick(handler);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      tg!.BackButton.offClick(handler);
+    };
   }, []);
   useEffect(() => {
     if (!inTelegram || !tg!.isVersionAtLeast('6.1')) return;
@@ -115,21 +146,21 @@ export function App() {
       ({ url, text } = await api.buy(l.id));
     } catch {
       // вне Telegram заявка не уходит, но чат продавца откроем
-      text = `Здравствуйте! Хочу iPhone ${l.family} за ${l.price_rub} ₽ (пост ${l.channel_msg_id})`;
+      text = `Здравствуйте! Хочу ${listingTitle(l)}${l.price_rub ? ` за ${formatPrice(l.price_rub)}` : ''} (пост ${l.channel_msg_id})`;
       url = `https://t.me/${store?.seller ?? 'manath'}?text=${encodeURIComponent(text)}`;
     }
     // не все клиенты подставляют ?text= — страхуемся буфером обмена
     const copied = await copyText(text);
     haptic.success();
-    if (copied) toast('Текст скопирован — если чат открылся пустым, вставьте его');
-    setTimeout(() => openTgLink(url), copied ? 700 : 0);
+    if (copied) toast('Текст скопирован — если чат открылся пустым, просто вставьте его');
+    setTimeout(() => openTgLink(url), copied ? 900 : 0);
   };
 
   const preview = detailId !== null ? items?.find((i) => i.id === detailId) ?? null : null;
 
   return (
     <div class="app">
-      <main class={`tabs tab-${tab}`}>
+      <main>
         <div class="tab-pane" hidden={tab !== 'catalog'}>
           <Catalog
             items={items}
@@ -144,21 +175,25 @@ export function App() {
             onRetry={load}
           />
         </div>
-        <div class="tab-pane" hidden={tab !== 'subs'}>
-          <Subscriptions preset={subPreset} available={facets?.families.map((f) => f.family) ?? []} toast={toast} />
-        </div>
-        <div class="tab-pane" hidden={tab !== 'about'}>
-          <About store={store} />
-        </div>
+        {visited.has('subs') && (
+          <div class="tab-pane" hidden={tab !== 'subs'}>
+            <Subscriptions preset={subPreset} available={facets?.families.map((f) => f.family) ?? []} toast={toast} />
+          </div>
+        )}
+        {visited.has('about') && (
+          <div class="tab-pane" hidden={tab !== 'about'}>
+            <About store={store} />
+          </div>
+        )}
       </main>
 
-      <nav class={`tabbar glass-strong ${detailId !== null ? 'away' : ''}`}>
+      <nav class={`tabbar glass-strong ${detailId !== null ? 'away' : ''}`} aria-label="Разделы">
         {([
           ['catalog', 'Каталог', IconGrid],
           ['subs', 'Подписки', IconBell],
           ['about', 'Магазин', IconStore],
         ] as const).map(([t, label, Icon]) => (
-          <button class={tab === t ? 'on' : ''} onClick={() => goTab(t)}>
+          <button class={tab === t ? 'on' : ''} aria-current={tab === t ? 'page' : undefined} onClick={() => goTab(t)}>
             <Icon size={22} />
             <span>{label}</span>
           </button>
@@ -188,7 +223,7 @@ export function App() {
         </div>
       )}
 
-      <div class={`toast glass-strong ${toastMsg ? 'show' : ''}`} role="status">
+      <div class={`toast glass-strong ${toastMsg ? 'show' : ''}`} role="status" aria-live="polite">
         {toastMsg}
       </div>
     </div>
