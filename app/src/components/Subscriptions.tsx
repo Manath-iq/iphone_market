@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Subscription } from '../../../shared/types';
 import { formatPrice, formatStorage } from '../../../shared/parser';
 import { api } from '../api';
@@ -21,6 +21,7 @@ export function Subscriptions({ preset, available, toast }: Props) {
   const [maxPrice, setMaxPrice] = useState('');
   const [subs, setSubs] = useState<Subscription[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const listRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (preset.family) setFamily(preset.family);
@@ -49,6 +50,8 @@ export function Subscriptions({ preset, available, toast }: Props) {
       const price = parseInt(maxPrice.replace(/\D/g, ''), 10) || null;
       setSubs(await api.subscribe({ family, storage_gb: storage, max_price: price }));
       haptic.success();
+      // показать, что подписка появилась в списке
+      setTimeout(() => listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
       toast('Готово! Напишем, как только появится');
       setStorage(null);
       setMaxPrice('');
@@ -122,7 +125,7 @@ export function Subscriptions({ preset, available, toast }: Props) {
       </button>
 
       {subs && subs.length > 0 && (
-        <section class="group">
+        <section class="group" ref={listRef}>
           <h3>Мои подписки</h3>
           <ul class="list subs">
             {subs.map((s) => (

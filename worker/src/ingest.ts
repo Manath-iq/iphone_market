@@ -170,7 +170,9 @@ export async function downloadPending(env: Env, limit = 30): Promise<{ done: num
       const len = +(res.headers.get('content-length') ?? 0);
       if (len > TG_FILE_LIMIT) throw new Error('too big');
       const body = await res.arrayBuffer();
-      await store.put(key, body, m.kind === 'video' ? 'video/mp4' : res.headers.get('content-type') || 'image/jpeg');
+      // Bot API отдаёт файлы как application/octet-stream — тип ставим сами
+      const ct = res.headers.get('content-type') ?? '';
+      await store.put(key, body, m.kind === 'video' ? 'video/mp4' : ct.startsWith('image/') ? ct : 'image/jpeg');
       stored = key;
       done++;
     } catch (e) {

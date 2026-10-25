@@ -32,6 +32,9 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     supports_inline_queries: false,
   } as UserFromGetMe;
   const bot = new Bot(env.BOT_TOKEN, { botInfo });
+  // На вебхуке bot.catch не срабатывает: ошибка превращается в 500, и Telegram повторяет апдейт снова и снова
+  // (дубли карточек, заявок, уведомлений). Поэтому все обработчики — за errorBoundary, ответ всегда 200.
+  const h = bot.errorBoundary((err) => console.error('bot error', err.error));
   const admins = adminIds(env);
   const isAdmin = (ctx: Context) => !!ctx.from && admins.includes(ctx.from.id);
   const catalogKb = () => new InlineKeyboard().webApp('📱 Открыть каталог', origin);
@@ -70,8 +73,8 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     waitUntil(downloadPending(env, 10));
   }
 
-  bot.on('channel_post', (ctx) => handleChannelMessage(ctx.channelPost, false));
-  bot.on('edited_channel_post', (ctx) => handleChannelMessage(ctx.editedChannelPost, true));
+  h.on('channel_post', (ctx) => handleChannelMessage(ctx.channelPost, false));
+  h.on('edited_channel_post', (ctx) => handleChannelMessage(ctx.editedChannelPost, true));
 
   const esc = (t: string) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
   /** админские команды: не-админу отдаём то же, что на любое сообщение, — кнопку каталога */
@@ -91,7 +94,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
   ].join('\n');
 
   // ——— Покупатель ———
-  bot.command('start', async (ctx) => {
+  h.command('start', async (ctx) => {
     // ссылка «Поделиться» из карточки: t.me/<бот>?start=l_12
     const shared = ctx.match.match(/^l_(\d+)$/);
     if (shared) {
@@ -129,12 +132,12 @@ export function createBot({ env, origin, waitUntil }: Deps) {
   });
 
   // ——— Продавец ———
-  bot.command(
+  h.command(
     'help',
     adminOnly((ctx) => ctx.reply(ADMIN_HELP, { parse_mode: 'HTML' })),
   );
 
-  bot.command(
+  h.command(
     'list',
     adminOnly(async (ctx) => {
       const { results } = await env.DB.prepare(`SELECT * FROM listings WHERE status = 'active' ORDER BY created_at DESC`).all<ListingRow>();
@@ -153,7 +156,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     }),
   );
 
-  bot.command(
+  h.command(
     'stats',
     adminOnly(async (ctx) => ctx.reply(await statsText(env), { parse_mode: 'HTML' })),
   );
@@ -163,7 +166,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     ['hide', 'hidden', 'скрыт из каталога'],
     ['show', 'active', 'снова в каталоге'],
   ] as const) {
-    bot.command(
+    h.command(
       cmd,
       adminOnly(async (ctx) => {
         const id = parseInt(ctx.match, 10);
@@ -174,7 +177,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     );
   }
 
-  bot.callbackQuery(/^(ok|hide|show):(\d+)$/, async (ctx) => {
+  h.callbackQuery(/^(ok|hide|show):(\d+)$/, async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCallbackQuery();
     const [, action, idStr] = ctx.match;
     const id = +idStr;
@@ -197,12 +200,11 @@ export function createBot({ env, origin, waitUntil }: Deps) {
   });
 
   // Всё остальное — кнопка каталога
-  bot.on('message', async (ctx) => {
+  h.on('message', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
     if (isAdmin(ctx) && ctx.message.text?.startsWith('/')) return ctx.reply(ADMIN_HELP, { parse_mode: 'HTML' });
     await ctx.reply('Все телефоны в наличии — в каталоге 👇', { reply_markup: catalogKb() });
   });
 
-  bot.catch((err) => console.error('bot error', err.error));
   return bot;
 }
