@@ -91,6 +91,17 @@ button:focus-visible {
 [hidden] {
   display: none !important;
 }
+/* внутри Telegram полоса прокрутки окна не нужна (на Mac она видна всегда) */
+html.in-tg {
+  scrollbar-width: none;
+}
+html.in-tg::-webkit-scrollbar,
+.overlay::-webkit-scrollbar {
+  display: none;
+}
+.overlay {
+  scrollbar-width: none;
+}
 s {
   color: var(--hint);
   font-weight: 500;

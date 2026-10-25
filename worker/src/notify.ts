@@ -17,13 +17,35 @@ export function shortLine(l: ListingRow): string {
   return parts.join(', ');
 }
 
-async function toAdmins(env: Env, text: string, keyboard?: InlineKeyboard) {
+/** Первое фото карточки для сообщения: file_id из Telegram, своё хранилище или ссылка CDN импорта */
+async function coverPhoto(env: Env, origin: string, listingId: number): Promise<string | null> {
+  const m = await env.DB.prepare(
+    `SELECT source, storage_key FROM media WHERE listing_id = ? AND kind = 'photo' ORDER BY position LIMIT 1`,
+  )
+    .bind(listingId)
+    .first<{ source: string; storage_key: string | null }>();
+  if (!m) return null;
+  if (m.source.startsWith('tg:')) return m.source.slice(3);
+  if (m.storage_key && m.storage_key !== 'skip') return `${origin}/media/${m.storage_key}`;
+  return m.source;
+}
+
+/** Сообщение с фото телефона, а если фото нет или Telegram его не принял — обычным текстом */
+async function sendCard(env: Env, chatId: number, text: string, keyboard?: InlineKeyboard, photo?: string | null) {
+  if (photo) {
+    try {
+      await api(env).sendPhoto(chatId, photo, { caption: text, parse_mode: 'HTML', reply_markup: keyboard });
+      return;
+    } catch (e) {
+      console.warn('photo send failed, falling back to text', chatId, String(e));
+    }
+  }
+  await api(env).sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard, link_preview_options: { is_disabled: true } });
+}
+
+async function toAdmins(env: Env, text: string, keyboard?: InlineKeyboard, photo?: string | null) {
   await Promise.all(
-    adminIds(env).map((id) =>
-      api(env)
-        .sendMessage(id, text, { parse_mode: 'HTML', reply_markup: keyboard, link_preview_options: { is_disabled: true } })
-        .catch((e) => console.warn('admin send failed', id, String(e))),
-    ),
+    adminIds(env).map((id) => sendCard(env, id, text, keyboard, photo).catch((e) => console.warn('admin send failed', id, String(e)))),
   );
 }
 
@@ -44,7 +66,7 @@ export async function sendAdminPreview(env: Env, origin: string, l: ListingRow) 
     .text('🙈 Скрыть', `hide:${l.id}`)
     .row()
     .webApp('Открыть в каталоге', cardUrl(origin, l.id));
-  await toAdmins(env, lines.join('\n'), kb);
+  await toAdmins(env, lines.join('\n'), kb, await coverPhoto(env, origin, l.id));
 }
 
 export async function sendBuyRequest(env: Env, l: ListingRow, user: { id: number; username?: string; first_name?: string }) {
@@ -64,15 +86,17 @@ export async function notifySubscribers(env: Env, origin: string, l: ListingRow)
   )
     .bind(l.family, l.storage_gb, l.price_rub ?? 0, l.id)
     .all<{ tg_user_id: number }>();
+  if (!results.length) return;
   const kb = new InlineKeyboard().webApp('Открыть карточку', cardUrl(origin, l.id));
+  const photo = await coverPhoto(env, origin, l.id);
   for (const { tg_user_id } of results) {
     const r = await env.DB.prepare('INSERT OR IGNORE INTO notifications (listing_id, tg_user_id, sent_at) VALUES (?, ?, ?)')
       .bind(l.id, tg_user_id, now())
       .run();
     if (!r.meta.changes) continue;
-    await api(env)
-      .sendMessage(tg_user_id, `🔔 Появился ${esc(shortLine(l))}`, { parse_mode: 'HTML', reply_markup: kb })
-      .catch((e) => console.warn('notify failed', tg_user_id, String(e)));
+    await sendCard(env, tg_user_id, `🔔 Появился <b>${esc(shortLine(l))}</b>`, kb, photo).catch((e) =>
+      console.warn('notify failed', tg_user_id, String(e)),
+    );
   }
 }
 
