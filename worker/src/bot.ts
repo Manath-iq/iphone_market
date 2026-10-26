@@ -12,6 +12,7 @@ import { registerStaff } from './bot-staff';
 import { channelKey, postUrl } from './publish';
 import { completePayment, getPayment, holdListing, preCheckout } from './payments';
 import { registerSeller, TEMPLATE_TEXT } from './bot-seller';
+import { sendWithCard } from './cards';
 
 interface Deps {
   env: Env;
@@ -77,12 +78,11 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     if (invite && ctx.from) {
       const role = invite[1] === 's' ? 'seller' : 'mod';
       const res = await acceptInvite(env, invite[2], role, ctx.from);
-      await ctx.reply(inviteReply(res, role), { parse_mode: 'HTML' });
-      if (res.ok && role === 'seller') await ctx.reply(TEMPLATE_TEXT, { parse_mode: 'HTML' });
-      if (res.ok) {
-        const who = personLink(ctx.from);
-        waitUntil(toStaff(env, `👤 ${who} ${role === 'seller' ? 'стал продавцом' : 'стал модератором'} по приглашению.`));
-      }
+      if (!res.ok) return ctx.reply(inviteReply(res, role), { parse_mode: 'HTML' });
+      // новому продавцу — сразу шаблон, модератору — что будет приходить; обоим с картинкой
+      if (role === 'seller') await sendWithCard(env, ctx.chat.id, 'seller', `${inviteReply(res, role)}\n\n${TEMPLATE_TEXT}`);
+      else await sendWithCard(env, ctx.chat.id, 'moderator', inviteReply(res, role));
+      waitUntil(toStaff(env, `👤 ${personLink(ctx.from)} ${role === 'seller' ? 'стал продавцом' : 'стал модератором'} по приглашению.`));
       return;
     }
     // ссылка «Поделиться» из карточки: t.me/<бот>?start=l_12
@@ -102,7 +102,10 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     }
     const count = await env.DB.prepare(`SELECT COUNT(*) AS c FROM listings WHERE status = 'active'`).first<{ c: number }>();
     const n = count?.c ?? 0;
-    await ctx.reply(
+    await sendWithCard(
+      env,
+      ctx.chat.id,
+      'welcome',
       [
         `Здравствуйте! Это каталог <b>${STORE.name}</b> 🍏`,
         '',
@@ -114,10 +117,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
         '• вопросы по телефону — менеджеру @Raxi_apple',
         '• подписка: напишу, когда появится нужная модель',
       ].join('\n'),
-      {
-        parse_mode: 'HTML',
-        reply_markup: new InlineKeyboard().webApp('📱 Открыть каталог', origin).row().webApp('🔔 Сообщить о поступлении', `${origin}/?tab=subs`),
-      },
+      new InlineKeyboard().webApp('📱 Открыть каталог', origin).row().webApp('🔔 Сообщить о поступлении', `${origin}/?tab=subs`),
     );
     if (ctx.from && (await isStaff(env, ctx.from.id))) await ctx.reply('Команды сотрудника — /help');
   });
@@ -179,7 +179,13 @@ function inviteReply(res: InviteResult, role: 'seller' | 'mod'): string {
   if (res.ok) {
     return role === 'seller'
       ? `Готово, вы продавец <b>${STORE.name}</b> ✅`
-      : `Готово, вы модератор <b>${STORE.name}</b> ✅\n\nСюда будут приходить новые товары и превью постов канала. Команды — /help`;
+      : [
+          `Готово, вы модератор <b>${STORE.name}</b> ✅`,
+          '',
+          'Сюда будут приходить заявки продавцов с кнопками «Опубликовать», «Изменить цену» и «Отклонить», а также превью новых постов канала.',
+          '',
+          'Кто первым нажал — тот и решил: у остальных модераторов заявка обновится сама. Все команды — /help',
+        ].join('\n');
   }
   switch (res.reason) {
     case 'no_username':

@@ -11,6 +11,7 @@ import { getSeller, personLink, touchSeller } from './roles';
 import { getSettings } from './settings';
 import { clearState, getState, setState } from './state';
 import { sendToModeration } from './moderation';
+import { sendWithCard } from './cards';
 import { applyStatus } from './publish';
 import {
   addPart,
@@ -99,7 +100,8 @@ export function registerSeller(h: Composer<Context>, { env, waitUntil }: Deps) {
   h.command('template', async (ctx, next) => {
     const seller = await activeSeller(ctx);
     if (!seller) return next();
-    await ctx.reply(seller === 'blocked' ? BLOCKED_TEXT : TEMPLATE_TEXT, { parse_mode: 'HTML' });
+    if (seller === 'blocked') return ctx.reply(BLOCKED_TEXT);
+    await sendWithCard(env, ctx.chat!.id, 'seller', TEMPLATE_TEXT);
   });
 
   h.command('my', async (ctx, next) => {

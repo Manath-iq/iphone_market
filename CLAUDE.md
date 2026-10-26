@@ -53,7 +53,9 @@ worker/   Hono API + grammY бот (webhook /bot) + cron; migrations/ — D1; te
   src/moderation.ts   карточка заявки у сотрудников; publish.ts — публикация в канал, «Продан/Снять»
   src/payments.ts     счёт, тестовая оплата, бронь, выдача ника
 shared/   parser.ts (разбор постов), caption.ts (подпись поста бота, вычистка контактов), scrape.ts, types.ts; тесты
-scripts/  import.ts (импорт ленты через /admin/import), fetch-emoji.ts (эмодзи из набора RestrictedEmoji)
+scripts/  import.ts (импорт ленты через /admin/import), fetch-emoji.ts (эмодзи из набора RestrictedEmoji),
+          render-cards.ts (картинки к сообщениям бота)
+design/   bot-cards/ — HTML-исходники картинок к сообщениям бота, logo.jpg — логотип канала
 docs/     v2-marketplace.md — требования, решения и план v2
 ```
 
@@ -104,8 +106,12 @@ npx tsc -p tsconfig.json          # типы app/shared (ошибки в parser.
   - превью новой карточки с фото и кнопками «Всё верно / Скрыть / Вернуть»;
   - уведомления подписчикам с фото;
   - статистика по понедельникам в 10:00 МСК.
+- **Картинки к сообщениям бота** (стиль логотипа канала: розовый неон на тёмном фоне):
+  - `welcome` — `/start`; `seller` — приглашение продавца и `/template`; `moderator` — приглашение модератора; `paid` — контакт продавца после оплаты;
+  - исходники в `design/bot-cards/*.html`; `node scripts/render-cards.ts` снимает живой мини-апп (каталог, карточка первого лота) и рендерит `app/public/cards/*.jpg`. Он же пишет `worker/src/cards-version.ts` с хэшами;
+  - `sendWithCard` (`cards.ts`) шлёт картинку по ссылке один раз и хранит её `file_id` в `settings` (`card:<имя>:<хэш>`). Перерисовали картинку → новый хэш → после деплоя загрузится заново.
 - **Мини-апп:**
-  - тема из `themeParams`, Liquid Glass;
+  - тема из `themeParams`, Liquid Glass; логотип канала (`app/public/logo.jpg`) в шапке и на вкладке «Магазин»;
   - полноэкранный режим на телефонах;
   - `MainButton` «Купить — X ₽» → лист оформления в два этапа (`Checkout.tsx`) → «Оплатить» (`openInvoice` или тестовая кнопка в боте); `BackButton` со стеком слоёв (`pushBack/popBack` в `tg.ts`);
   - «Лот №», метка «Забронирован», «Вопрос по лоту — @Raxi_apple»;
@@ -129,6 +135,7 @@ npx tsc -p tsconfig.json          # типы app/shared (ошибки в parser.
 - **`.overlay` карточки с `transform`.** `position: fixed` внутри неё не прижимается к экрану. Листы поверх карточки рендерить через `Portal` в `Detail.tsx` (без `preact/compat` — он стоит +2,5 КБ).
 - **zsh:** переменная с флагами (`$C`) не разбивается на аргументы — флаги wrangler писать явно.
 - **Python на машине без SSL-сертификатов** (`urllib` падает) — HTTP-запросы делать через `curl`.
+- **Скриншоты мини-аппа для картинок.** Headless Chrome не делает окно уже ~450 px, а в iframe не проигрываются анимации появления карточек. Поэтому `render-cards.ts` управляет Chrome по DevTools: эмуляция телефона 390×844, светлая тема.
 - **iOS Simulator недоступен** (не принята лицензия Xcode, нужен `sudo`). На iPhone пользователь проверяет сам.
 
 ## Как проверять
@@ -151,7 +158,7 @@ npx tsc -p tsconfig.json          # типы app/shared (ошибки в parser.
   - `sellerUsername: 'manath'` → `'Raxi_Apple'`;
   - тексты «О магазине» — заглушки (`about.demo`).
 - `worker/wrangler.toml`: `PUBLIC_READ = "1"` → `"0"`; `BOT_USERNAME` — на бота заказчика. В `app/src/App.tsx` константа `BOT_USERNAME` тоже.
-- `worker/src/index.ts`: `PUBLIC_ORIGIN` — адрес воркера для ссылок из cron.
+- `worker/src/config.ts`: `PUBLIC_ORIGIN` — адрес воркера для ссылок из cron и картинок к сообщениям. После смены — перерисовать картинки (`node scripts/render-cards.ts`, в скрипте тоже адрес `APP`).
 - Канал публикации — `/channel @apple_raxi` после добавления бота админом (сейчас «RaXi тест»).
 - `PAYMENT_PROVIDER_TOKEN` — секрет с токеном ЮKassa; в `allowed_updates` вебхука должны быть `pre_checkout_query` и `message`. Тестовая оплата доступна всем, пока токена нет.
 - Ссылка «Купить лот» — `APP_LINK` в `[vars]` (например, `https://t.me/<бот>?startapp=l_{id}`, если в BotFather настроен Main Mini App); по умолчанию `?start=l_{id}`.

@@ -17,7 +17,7 @@ export function About({ store }: { store: StoreInfo | null }) {
     <div class="screen page">
       <div class="page-hero">
         <div class="brand-mark big" aria-hidden="true">
-          <span>R</span>
+          <img src="/logo.jpg" alt="" />
         </div>
         <h1>{store.name}</h1>
         <p>Б/у iPhone с проверкой. Каждый телефон — с честным описанием и реальными фото.</p>

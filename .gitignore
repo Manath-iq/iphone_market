@@ -4,3 +4,4 @@ app/dist
 .dev.vars
 *.log
 .DS_Store
+design/bot-cards/shots

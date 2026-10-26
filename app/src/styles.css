@@ -166,19 +166,22 @@ video {
   border-radius: 12px;
   display: grid;
   place-items: center;
-  background: radial-gradient(120% 120% at 20% 0%, #ffb37a 0%, var(--accent) 45%, #c2310a 100%);
-  color: #fff;
-  font-weight: 800;
-  font-size: 20px;
-  letter-spacing: -0.5px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent);
+  /* логотип канала: розовый неон на тёмном фоне */
+  background: #140b14;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(255, 46, 150, 0.3);
   flex: none;
+}
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .brand-mark.big {
   width: 72px;
   height: 72px;
   border-radius: 22px;
-  font-size: 36px;
   margin: 0 auto 12px;
 }
 .brand-text {

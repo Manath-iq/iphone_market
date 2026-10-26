@@ -1,0 +1,102 @@
+/* Общий стиль картинок к сообщениям бота: 1280×720, в стиле логотипа канала — розовый неон на тёмной сливовой стене */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1280px; height: 720px; overflow: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+  color: #fff;
+  background:
+    radial-gradient(720px 600px at 80% 40%, rgba(255, 46, 150, 0.42), transparent 62%),
+    radial-gradient(520px 420px at 4% 104%, rgba(170, 60, 160, 0.22), transparent 70%),
+    linear-gradient(160deg, #1d1220 0%, #0d080e 72%);
+  -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+/* фактура стены, как на логотипе */
+body::before {
+  content: ''; position: absolute; inset: 0; opacity: 0.22; mix-blend-mode: overlay; pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.left { position: absolute; left: 84px; top: 74px; width: 600px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.logo {
+  width: 64px; height: 64px; border-radius: 18px; display: block; object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(255, 140, 210, 0.25), 0 8px 28px rgba(255, 46, 150, 0.45);
+}
+.brand b { font-size: 24px; letter-spacing: -0.3px; display: block; }
+.brand span { font-size: 16px; color: rgba(255, 255, 255, 0.55); }
+h1 { margin-top: 46px; font-size: 58px; line-height: 1.04; letter-spacing: -1.6px; font-weight: 800; }
+/* неоновая трубка, как буквы логотипа */
+h1 em {
+  font-style: normal; color: #ffe3f2;
+  text-shadow: 0 0 6px #ff6cbd, 0 0 18px #ff2e96, 0 0 38px rgba(255, 46, 150, 0.75), 0 0 70px rgba(255, 46, 150, 0.45);
+}
+ul { list-style: none; margin-top: 38px; display: grid; gap: 18px; }
+li { display: flex; align-items: center; gap: 16px; font-size: 23px; line-height: 1.25; color: rgba(255, 255, 255, 0.88); }
+li i {
+  flex: none; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
+  font-style: normal; font-size: 23px;
+  background: rgba(255, 120, 200, 0.09); box-shadow: inset 0 0 0 1px rgba(255, 150, 215, 0.16);
+}
+.hint {
+  position: absolute; left: 84px; bottom: 54px; display: inline-flex; align-items: center; gap: 10px;
+  font-size: 19px; font-weight: 600; color: rgba(255, 255, 255, 0.7);
+}
+.hint b { color: #fff; }
+/* рамка iPhone с живым интерфейсом внутри; уходит за нижний край картинки */
+.phone {
+  position: absolute; left: 790px; top: 64px; width: 372px; height: 800px;
+  border-radius: 62px; padding: 13px; background: #0d0d0f;
+  box-shadow: 0 0 0 2px #3a3a3e, 0 40px 90px rgba(0, 0, 0, 0.6), 0 0 120px rgba(255, 46, 150, 0.3);
+  transform: rotate(4deg);
+}
+.screen { width: 100%; height: 100%; border-radius: 50px; overflow: hidden; position: relative; background: #f2f2f7; }
+.screen img { display: block; width: 100%; }
+/* статус-бар iPhone: шапка мини-аппа в Telegram идёт ниже него */
+.status {
+  height: 46px; padding: 0 30px; display: flex; align-items: center; justify-content: space-between;
+  background: #f7f7fa; color: #000; font-size: 15px; position: relative;
+}
+.status b { font-weight: 600; }
+.status i { font-style: normal; font-size: 10px; letter-spacing: 1px; }
+.island { position: absolute; top: 11px; left: 50%; width: 104px; height: 30px; margin-left: -52px; border-radius: 16px; background: #000; }
+
+/* шаги с неоновыми номерами (продавцу) */
+ol.steps { list-style: none; margin-top: 36px; display: grid; gap: 16px; counter-reset: s; }
+ol.steps li { counter-increment: s; }
+ol.steps li::before {
+  content: counter(s); flex: none; width: 46px; height: 46px; border-radius: 23px; display: grid; place-items: center;
+  font-size: 22px; font-weight: 800; color: #ffe3f2;
+  box-shadow: inset 0 0 0 2px #ff5cb4, 0 0 14px rgba(255, 46, 150, 0.6), inset 0 0 12px rgba(255, 46, 150, 0.45);
+  text-shadow: 0 0 8px #ff2e96;
+}
+
+/* стеклянная панель справа (оплата, модерация) */
+.panel {
+  position: absolute; right: 90px; top: 120px; width: 440px; padding: 30px 30px 26px; border-radius: 30px;
+  background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 170, 225, 0.18), 0 40px 90px rgba(0, 0, 0, 0.5), 0 0 110px rgba(255, 46, 150, 0.22);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); transform: rotate(3deg);
+}
+.check {
+  width: 92px; height: 92px; border-radius: 46px; display: grid; place-items: center; margin-bottom: 18px;
+  box-shadow: inset 0 0 0 3px #ff6cbd, 0 0 24px rgba(255, 46, 150, 0.7), inset 0 0 20px rgba(255, 46, 150, 0.5);
+}
+.check svg { filter: drop-shadow(0 0 6px #ff2e96); }
+.panel h2 { font-size: 30px; letter-spacing: -0.6px; margin-bottom: 18px; }
+.rows { display: grid; gap: 0; }
+.rows div { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; font-size: 19px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.rows span { color: rgba(255, 255, 255, 0.6); }
+.rows b { font-weight: 600; text-align: right; }
+.rows b.ok { color: #ffd0ea; text-shadow: 0 0 10px rgba(255, 46, 150, 0.8); }
+
+/* сообщение бота с кнопками — как в Telegram (модератору) */
+.tg { position: absolute; right: 80px; top: 70px; width: 460px; transform: rotate(3deg); filter: drop-shadow(0 40px 60px rgba(0, 0, 0, 0.5)); }
+.tg-msg { border-radius: 22px 22px 22px 6px; overflow: hidden; background: #212024; box-shadow: 0 0 100px rgba(255, 46, 150, 0.25); }
+.tg-photo { height: 236px; background: url(shots/detail.png) center 18% / cover; }
+.tg-text { padding: 14px 18px 16px; font-size: 17px; line-height: 1.45; color: #f2f2f7; }
+.tg-text .muted { color: rgba(255, 255, 255, 0.55); }
+.tg-kb { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.tg-kb span {
+  height: 46px; border-radius: 14px; display: grid; place-items: center; font-size: 16px; font-weight: 600;
+  background: rgba(60, 50, 64, 0.85); color: #fff; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+.tg-kb span.wide { grid-column: 1 / -1; box-shadow: inset 0 0 0 1.5px #ff6cbd, 0 0 18px rgba(255, 46, 150, 0.45); }

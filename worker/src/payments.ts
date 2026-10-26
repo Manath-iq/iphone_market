@@ -8,6 +8,7 @@ import { api, esc, toStaff } from './notify';
 import { getSeller, personLink, type Person } from './roles';
 import { getSettings } from './settings';
 import { STORE } from './config';
+import { sendWithCard } from './cards';
 
 /**
  * Оплата комиссии площадки и бронь.
@@ -172,9 +173,9 @@ export async function completePayment(env: Env, paymentId: number, chargeId: str
   const buyer = personLink({ id: pay.buyer_id, username: pay.buyer_username, first_name: pay.buyer_name });
 
   let delivered = true;
+  // сообщение с контактом — с картинкой «Оплата прошла»
   const toBuyer = (text: string, kb?: InlineKeyboard) =>
-    api(env)
-      .sendMessage(pay.buyer_id, text, { parse_mode: 'HTML', reply_markup: kb })
+    sendWithCard(env, pay.buyer_id, 'paid', text, kb)
       .catch((e) => {
         delivered = false;
         console.error('buyer contact send failed', pay.buyer_id, String(e));

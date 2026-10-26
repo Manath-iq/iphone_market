@@ -68,7 +68,7 @@ export function Catalog({ items, facets, filters, setFilters, storeName, error, 
       <header class="topbar glass">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">
-            <span>R</span>
+            <img src="/logo.jpg" alt="" />
           </div>
           <div class="brand-text">
             <div class="brand-name">{storeName}</div>

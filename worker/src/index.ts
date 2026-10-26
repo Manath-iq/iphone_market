@@ -10,12 +10,9 @@ import { createBot } from './bot';
 import { catchUpNotifications, sendWeeklyStats } from './notify';
 import { checkDeleted, importChannel, importReviews, type ReviewsMeta } from './importer';
 import { downloadPending, purgeSoldMedia } from './ingest';
-import { STORE } from './config';
+import { PUBLIC_ORIGIN, STORE } from './config';
 import { MANAGER_USERNAME } from '../../shared/caption';
 import { createCheckout, notifyExpiredReservations } from './payments';
-
-/** адрес воркера для ссылок из cron (в обработчиках запросов берём origin из запроса) */
-const PUBLIC_ORIGIN = 'https://raxi-catalog.todominate-ai.workers.dev';
 
 type Ctx = { Bindings: Env; Variables: { user: TgUser | null } };
 const app = new Hono<Ctx>();
