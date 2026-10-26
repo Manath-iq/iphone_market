@@ -1504,3 +1504,109 @@ video {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ——— Бронь и номер лота ——— */
+.badge-reserved {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  height: 24px;
+  padding: 0 9px 0 7px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.card.is-reserved .card-photo img {
+  filter: saturate(0.6);
+}
+.badge-sold {
+  gap: 4px;
+}
+.lot-no {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--hint);
+  font-variant-numeric: tabular-nums;
+}
+.nowrap {
+  white-space: nowrap;
+}
+
+/* ——— Оформление покупки ——— */
+.co-lead {
+  margin: 14px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.co-steps {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.co-steps li {
+  padding: 14px 14px 12px;
+  border-radius: 16px;
+  background: var(--fill);
+}
+.co-step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.co-step-head b {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.co-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+}
+.co-steps p {
+  margin: 6px 0 0 34px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--hint);
+}
+.co-legal {
+  margin: 14px 0 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--hint);
+}
+.co-legal a {
+  color: var(--link);
+}
+.co-done {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 18px 8px 16px;
+  text-align: center;
+}
+.co-done p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+}

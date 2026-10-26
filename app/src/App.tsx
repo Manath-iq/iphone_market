@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Facets, Listing } from '../../shared/types';
-import { formatPrice, listingTitle } from '../../shared/parser';
 import { api, type StoreInfo } from './api';
 import { EMPTY, type Filters } from './filters';
-import { copyText, haptic, inTelegram, openTgLink, popBack, startParam, tg } from './tg';
+import { haptic, inTelegram, popBack, startParam, tg } from './tg';
 import { Catalog } from './components/Catalog';
 import { FilterSheet } from './components/FilterSheet';
 import { Detail } from './components/Detail';
@@ -138,24 +137,6 @@ export function App() {
     document.documentElement.classList.toggle('lock', detailId !== null || sheet);
   }, [detailId, sheet]);
 
-  const buy = async (l: Listing) => {
-    haptic.medium();
-    let url: string;
-    let text: string;
-    try {
-      ({ url, text } = await api.buy(l.id));
-    } catch {
-      // вне Telegram заявка не уходит, но чат продавца откроем
-      text = `Здравствуйте! Хочу ${listingTitle(l)}${l.price_rub ? ` за ${formatPrice(l.price_rub)}` : ''} (пост ${l.channel_msg_id})`;
-      url = `https://t.me/${store?.seller ?? 'manath'}?text=${encodeURIComponent(text)}`;
-    }
-    // не все клиенты подставляют ?text= — страхуемся буфером обмена
-    const copied = await copyText(text);
-    haptic.success();
-    if (copied) toast('Текст скопирован — если чат открылся пустым, просто вставьте его');
-    setTimeout(() => openTgLink(url), copied ? 900 : 0);
-  };
-
   const preview = detailId !== null ? items?.find((i) => i.id === detailId) ?? null : null;
 
   return (
@@ -217,7 +198,7 @@ export function App() {
             preview={preview}
             botUsername={BOT_USERNAME}
             onClose={() => setDetailId(null)}
-            onBuy={buy}
+            onReserved={load}
             toast={toast}
           />
         </div>

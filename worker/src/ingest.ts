@@ -4,6 +4,7 @@ import { now } from './env';
 import type { ListingRow } from './db';
 import { kvMediaStore, TG_FILE_LIMIT } from './media';
 import { llmFallback } from './llm';
+import { getSettings } from './settings';
 
 export interface IncomingPost {
   channel: string;
@@ -19,6 +20,15 @@ export interface UpsertResult {
   created: boolean;
   becameSold: boolean;
   priceChanged: boolean;
+}
+
+/**
+ * Цены поста владельца. Комиссия площадки либо добавляется к цене из поста (plus), либо уже внутри неё (incl) —
+ * переключается командой /fee_mode. price — итоговая цена для покупателя, seller — часть, которая идёт продавцу.
+ */
+export function ownerPrices(postPrice: number | null, fee: number, inPost: boolean) {
+  if (!postPrice) return { price: null, seller: null };
+  return inPost ? { price: postPrice, seller: Math.max(0, postPrice - fee) } : { price: postPrice + fee, seller: postPrice };
 }
 
 /** Создать или обновить карточку по тексту поста. Посты без хэштега, которых ещё нет в базе, игнорируются. */
@@ -37,19 +47,22 @@ export async function upsertPost(env: Env, post: IncomingPost): Promise<UpsertRe
   const ts = now();
 
   if (!existing) {
+    const { fee_rub, owner_fee_mode } = await getSettings(env);
+    const inPost = owner_fee_mode === 'incl';
+    const prices = ownerPrices(p.price_rub, fee_rub, inPost);
     const row = await env.DB.prepare(
       `INSERT INTO listings (source_channel, channel_msg_id, media_group_id, category, model_raw, family, storage_gb,
         condition, sim, has_physical_sim, battery_pct, battery_cycles, ios, pluses, nuances, kit, full_kit, price_rub,
-        status, parse_ok, raw_text, post_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        status, parse_ok, raw_text, post_url, created_at, updated_at, seller_price_rub, fee_rub, fee_in_post)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (source_channel, channel_msg_id) DO UPDATE SET updated_at = excluded.updated_at
        RETURNING *`,
     )
       .bind(
         post.channel, post.msg_id, post.media_group_id, p.category, p.model_raw, p.family, p.storage_gb,
         p.condition, p.sim, p.has_physical_sim === null ? null : +p.has_physical_sim, p.battery_pct, p.battery_cycles,
-        p.ios, JSON.stringify(p.pluses), JSON.stringify(p.nuances), p.kit, +p.full_kit, p.price_rub,
-        p.status, +p.parse_ok, post.text, post.post_url, post.date || ts, ts,
+        p.ios, JSON.stringify(p.pluses), JSON.stringify(p.nuances), p.kit, +p.full_kit, prices.price,
+        p.status, +p.parse_ok, post.text, post.post_url, post.date || ts, ts, prices.seller, fee_rub, +inPost,
       )
       .first<ListingRow>();
     if (!row) return null;
@@ -62,7 +75,10 @@ export async function upsertPost(env: Env, post: IncomingPost): Promise<UpsertRe
   if (p.status === 'sold' && status === 'active') status = 'sold';
   if (p.status === 'active' && status === 'sold') status = 'active';
   const becameSold = existing.status === 'active' && status === 'sold';
-  const priceChanged = !!p.price_rub && !!existing.price_rub && p.price_rub !== existing.price_rub;
+  // комиссия карточки зафиксирована при создании; у старых карточек без цены — текущая
+  const fee = existing.fee_rub ?? (await getSettings(env)).fee_rub;
+  const prices = ownerPrices(p.price_rub, fee, !!existing.fee_in_post);
+  const priceChanged = !!prices.price && !!existing.price_rub && prices.price !== existing.price_rub;
   if (priceChanged) {
     await env.DB.prepare('INSERT INTO price_history (listing_id, price_rub, changed_at) VALUES (?, ?, ?)')
       .bind(existing.id, existing.price_rub, ts)
@@ -71,15 +87,15 @@ export async function upsertPost(env: Env, post: IncomingPost): Promise<UpsertRe
   const row = await env.DB.prepare(
     `UPDATE listings SET model_raw = ?, family = ?, storage_gb = ?, condition = ?, sim = ?, has_physical_sim = ?,
        battery_pct = ?, battery_cycles = ?, ios = ?, pluses = ?, nuances = ?, kit = ?, full_kit = ?, price_rub = ?,
-       status = ?, parse_ok = ?, raw_text = ?, updated_at = ?,
+       seller_price_rub = COALESCE(?, seller_price_rub), fee_rub = ?, status = ?, parse_ok = ?, raw_text = ?, updated_at = ?,
        sold_at = CASE WHEN ? = 'sold' AND sold_at IS NULL THEN ? WHEN ? = 'active' THEN NULL ELSE sold_at END
      WHERE id = ? RETURNING *`,
   )
     .bind(
       p.model_raw ?? existing.model_raw, p.family ?? existing.family, p.storage_gb ?? existing.storage_gb,
       p.condition, p.sim, p.has_physical_sim === null ? null : +p.has_physical_sim, p.battery_pct, p.battery_cycles,
-      p.ios, JSON.stringify(p.pluses), JSON.stringify(p.nuances), p.kit, +p.full_kit, p.price_rub ?? existing.price_rub,
-      status, +p.parse_ok, post.text, ts, status, ts, status, existing.id,
+      p.ios, JSON.stringify(p.pluses), JSON.stringify(p.nuances), p.kit, +p.full_kit, prices.price ?? existing.price_rub,
+      prices.seller, fee, status, +p.parse_ok, post.text, ts, status, ts, status, existing.id,
     )
     .first<ListingRow>();
   return row ? { listing: row, created: false, becameSold, priceChanged } : null;

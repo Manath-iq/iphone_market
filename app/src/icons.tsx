@@ -83,3 +83,15 @@ export const IconBattery = (p: P) => (
     <path d="M21.5 11v2" />
   </S>
 );
+export const IconLock = (p: P) => (
+  <S {...p}>
+    <rect x="5" y="10.5" width="14" height="10" rx="2.5" />
+    <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />
+  </S>
+);
+export const IconQuestion = (p: P) => (
+  <S {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.7M12 17.1v.1" />
+  </S>
+);

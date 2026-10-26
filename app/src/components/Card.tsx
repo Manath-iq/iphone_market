@@ -3,11 +3,12 @@ import { formatPrice, formatStorage } from '../../../shared/parser';
 import { batteryTone, isNew } from '../filters';
 import { Emoji } from './Emoji';
 import { Img } from './Img';
+import { IconLock } from '../icons';
 
 export function Card({ l, onOpen, index }: { l: Listing; onOpen: (l: Listing) => void; index: number }) {
   const meta = [l.storage_gb ? formatStorage(l.storage_gb) : null, l.condition].filter(Boolean).join(' · ');
   return (
-    <button class="card" style={{ '--i': Math.min(index, 8) }} onClick={() => onOpen(l)}>
+    <button class={`card ${l.reserved ? 'is-reserved' : ''}`} style={{ '--i': Math.min(index, 8) }} onClick={() => onOpen(l)}>
       <div class="card-photo">
         {l.cover ? (
           <Img src={l.cover} eager={index < 4} />
@@ -16,7 +17,12 @@ export function Card({ l, onOpen, index }: { l: Listing; onOpen: (l: Listing) =>
             <Emoji name="phone" size={48} />
           </div>
         )}
-        {isNew(l) && (
+        {l.reserved ? (
+          <span class="badge-reserved">
+            <IconLock size={13} />
+            Забронирован
+          </span>
+        ) : isNew(l) && (
           <span class="badge-new">
             <Emoji name="sparkles" size={14} />
             Новое

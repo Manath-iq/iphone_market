@@ -33,6 +33,7 @@ interface WebApp {
   openLink(url: string): void;
   requestWriteAccess(cb?: (ok: boolean) => void): void;
   showAlert(msg: string, cb?: () => void): void;
+  openInvoice(url: string, cb?: (status: 'paid' | 'cancelled' | 'failed' | 'pending') => void): void;
   MainButton: TgButton;
   BackButton: TgButton;
   HapticFeedback: {
@@ -80,6 +81,20 @@ export const haptic = {
 export function openTgLink(url: string) {
   if (inTelegram) w!.openTelegramLink(url);
   else window.open(url, '_blank');
+}
+
+/** Внешняя ссылка (оферта): в Telegram — встроенный браузер, вне его — новая вкладка */
+export function openExternal(url: string) {
+  if (inTelegram) w!.openLink(url);
+  else window.open(url, '_blank');
+}
+
+/** Счёт Telegram Payments поверх мини-аппа; статус — paid, cancelled, failed или pending */
+export function openInvoice(url: string): Promise<string> {
+  return new Promise((resolve) => {
+    if (!supports('6.1')) return resolve('failed');
+    w!.openInvoice(url, (status) => resolve(status));
+  });
 }
 
 export function requestWriteAccess(): Promise<boolean> {

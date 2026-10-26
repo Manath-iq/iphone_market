@@ -73,11 +73,6 @@ export async function sendAdminPreview(env: Env, origin: string, l: ListingRow) 
   await toStaff(env, lines.join('\n'), kb, await coverPhoto(env, origin, l.id));
 }
 
-export async function sendBuyRequest(env: Env, l: ListingRow, user: { id: number; username?: string; first_name?: string }) {
-  const who = user.username ? `@${esc(user.username)}` : `<a href="tg://user?id=${user.id}">${esc(user.first_name ?? 'Покупатель')}</a>`;
-  await toStaff(env, `🛒 ${who} нажал «Купить»: <b>${esc(listingTitle(l))}</b>${l.price_rub ? ', ' + formatPrice(l.price_rub) : ''}\n<a href="${l.post_url}">Пост в канале</a>`);
-}
-
 /**
  * Разослать новую карточку подписчикам, у которых совпали модель, память и потолок цены.
  * limit держит запуск в бесплатном лимите (50 подзапросов): остальным разошлёт часовой cron (catchUpNotifications) —

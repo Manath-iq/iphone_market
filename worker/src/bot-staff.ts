@@ -10,6 +10,7 @@ import { clearState, getState, setState } from './state';
 import { getSubmission, getSubmissionMedia, moveStatus, parsedOf, type SubmissionRow } from './submissions';
 import { modKeyboard, refreshModCards } from './moderation';
 import { applyStatus, publishSubmission, revertPublishing } from './publish';
+import { formatMsk, isReserved, unreserve } from './payments';
 
 interface Deps {
   env: Env;
@@ -45,7 +46,8 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
       const lines = results.map((l) => {
         const days = Math.max(0, Math.floor((now() - l.created_at) / 86400));
         const age = days === 0 ? 'сегодня' : `${days} ${plural(days, 'день', 'дня', 'дней')}`;
-        return `<code>${l.id}</code> · <a href="${l.post_url}">${esc(listingTitle(l))}</a> — ${l.price_rub ? formatPrice(l.price_rub) : '?'} · ${age}${l.parse_ok ? '' : ' ⚠️'}`;
+        const lock = isReserved(l) ? ` · 🔒 до ${formatMsk(l.reserved_until!)}` : '';
+        return `<code>${l.id}</code> · <a href="${l.post_url}">${esc(listingTitle(l))}</a> — ${l.price_rub ? formatPrice(l.price_rub) : '?'} · ${age}${lock}${l.parse_ok ? '' : ' ⚠️'}`;
       });
       const warn = results.some((l) => !l.parse_ok) ? '\n\n⚠️ — пост разобран не полностью, проверьте карточку' : '';
       await ctx.reply(`<b>В наличии: ${results.length}</b>\n\n${lines.join('\n')}${warn}`, {
@@ -76,6 +78,16 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
       }),
     );
   }
+
+  h.command(
+    'unreserve',
+    staffOnly(async (ctx) => {
+      const id = parseInt(ctx.match, 10);
+      if (!id) return ctx.reply('Укажите номер лота: /unreserve 12');
+      const l = await unreserve(env, id);
+      await ctx.reply(l ? `Бронь снята: лот №${l.id} снова можно купить.` : 'Лот с таким номером не найден.');
+    }),
+  );
 
   // Превью новой карточки из канала: «Всё верно / Скрыть / Вернуть»
   h.callbackQuery(/^(ok|hide|show):(\d+)$/, async (ctx) => {
@@ -323,6 +335,7 @@ async function helpText(env: Env, owner: boolean): Promise<string> {
     '/sold 12 — снять как проданный',
     '/hide 12 — скрыть',
     '/show 12 — вернуть в каталог',
+    '/unreserve 12 — снять бронь',
     '',
     'Новые посты с #АКТУАЛЬНО_RaXi попадают в каталог сами, а замена хэштега на «Продано» снимает карточку.',
   ];

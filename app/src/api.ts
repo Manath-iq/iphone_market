@@ -6,7 +6,11 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
     headers: { 'content-type': 'application/json', 'x-init-data': initData, ...(init.headers ?? {}) },
   });
-  if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
+  if (!res.ok) {
+    // сервер присылает понятный текст ошибки для покупателя (например, «уже забронирован»)
+    const body = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw Object.assign(new Error(body?.message ?? `HTTP ${res.status}`), { status: res.status });
+  }
   return res.json() as Promise<T>;
 }
 
@@ -25,8 +29,11 @@ export const api = {
   store: () => req<StoreInfo>('/api/store'),
   event: (type: 'app_open' | 'card_view' | 'subscribe', listing_id?: number) =>
     initData ? req('/api/events', { method: 'POST', body: JSON.stringify({ type, listing_id }) }).catch(() => {}) : Promise.resolve(),
-  buy: (listing_id: number) =>
-    req<{ ok: boolean; text: string; url: string }>('/api/buy', { method: 'POST', body: JSON.stringify({ listing_id }) }),
+  checkout: (listing_id: number) =>
+    req<{ ok: true; mode: 'invoice'; url: string } | { ok: true; mode: 'test' }>('/api/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ listing_id }),
+    }),
   subscriptions: () => req<{ items: Subscription[] }>('/api/subscriptions').then((r) => r.items),
   subscribe: (s: { family: string; storage_gb: number | null; max_price: number | null }) =>
     req<{ items: Subscription[] }>('/api/subscriptions', { method: 'POST', body: JSON.stringify(s) }).then((r) => r.items),

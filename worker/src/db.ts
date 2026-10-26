@@ -36,6 +36,9 @@ export interface ListingRow {
   fee_in_post: number;
   reserved_until: number | null;
   reserved_by: number | null;
+  /** 1 — бронь оплачена, 0 — короткое удержание на время оплаты */
+  reserve_paid: number;
+  reserve_notified: number;
 }
 
 export const mediaUrl = (key: string) => `/media/${key}`;
@@ -64,6 +67,8 @@ export function toListing(r: ListingRow & { cover_key?: string | null; old_price
     post_url: r.post_url,
     created_at: r.created_at,
     cover: r.cover_key ? mediaUrl(r.cover_key) : null,
+    fee_rub: r.fee_rub,
+    reserved: !!r.reserved_until && r.reserved_until > Math.floor(Date.now() / 1000),
   };
 }
 
@@ -108,10 +113,12 @@ export async function queryListings(env: Env, q: ListingQuery): Promise<Listing[
   return results.map(toListing);
 }
 
-export async function getListing(env: Env, id: number): Promise<Listing | null> {
+/** userId — кто смотрит: ему сообщаем только «бронь ваша», кто забронировал — не отдаём */
+export async function getListing(env: Env, id: number, userId?: number): Promise<Listing | null> {
   const row = await env.DB.prepare(`${LISTING_SELECT} WHERE l.id = ?`).bind(id).first<ListingRow>();
   if (!row) return null;
   const listing = toListing(row);
+  listing.reserved_by_me = listing.reserved && !!userId && row.reserved_by === userId && !!row.reserve_paid;
   const { results } = await env.DB.prepare(
     `SELECT id, kind, storage_key, width, height, position FROM media
      WHERE listing_id = ? AND storage_key IS NOT NULL AND storage_key != 'skip' ORDER BY position`,

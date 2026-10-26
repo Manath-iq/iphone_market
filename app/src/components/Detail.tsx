@@ -1,58 +1,99 @@
+import { render, type ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Listing, MediaItem } from '../../../shared/types';
 import { formatPrice, formatStorage } from '../../../shared/parser';
 import { batteryTone, isNew } from '../filters';
 import { api } from '../api';
-import { haptic, inTelegram, tg, openTgLink, pushBack, copyText } from '../tg';
-import { IconCheck, IconChevron, IconClose, IconInfo, IconPaper, IconPlay, IconShare } from '../icons';
+import { haptic, inTelegram, tg, openTgLink, openInvoice, pushBack, copyText, requestWriteAccess } from '../tg';
+import { IconCheck, IconChevron, IconClose, IconInfo, IconLock, IconPaper, IconPlay, IconQuestion, IconShare } from '../icons';
 import { Emoji } from './Emoji';
 import { Img } from './Img';
+import { Checkout, type CheckoutStage } from './Checkout';
+
+/** Вопросы по лоту — менеджеру площадки; продавца покупатель до оплаты не видит */
+const MANAGER = 'Raxi_apple';
 
 interface Props {
   id: number;
   preview: Listing | null;
   botUsername: string;
   onClose: () => void;
-  onBuy: (l: Listing) => Promise<void>;
+  /** после оплаты — обновить каталог, чтобы у карточки появилась бронь */
+  onReserved: () => void;
   toast: (msg: string) => void;
 }
 
-export function Detail({ id, preview, botUsername, onClose, onBuy, toast }: Props) {
+export function Detail({ id, preview, botUsername, onClose, onReserved, toast }: Props) {
   const [l, setL] = useState<Listing | null>(preview);
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
   const [viewer, setViewer] = useState<number | null>(null);
-  const [buying, setBuying] = useState(false);
+  const [co, setCo] = useState<CheckoutStage | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const reload = () =>
     api
       .listing(id)
       .then((x) => (setL(x), setLoaded(true)))
       .catch(() => (setMissing(true), setLoaded(true)));
+
+  useEffect(() => {
+    reload();
     api.event('card_view', id);
   }, [id]);
 
-  // Главная кнопка Telegram: «Купить — 43 990 ₽»
+  // «Назад» сначала закрывает лист оформления
+  useEffect(() => (co ? pushBack(() => setCo(null)) : undefined), [co !== null]);
+
+  const openBot = () => (haptic.tap(), openTgLink(`https://t.me/${botUsername}`));
+
+  const pay = async () => {
+    if (!l || busy) return;
+    if (!inTelegram) return toast('Оплата работает в Telegram — откройте каталог через бота');
+    haptic.medium();
+    setBusy(true);
+    try {
+      // контакт продавца бот пришлёт в чат — без разрешения на сообщения он не дойдёт
+      await requestWriteAccess();
+      const r = await api.checkout(l.id);
+      if (r.mode === 'invoice') {
+        const status = await openInvoice(r.url);
+        if (status === 'paid') (haptic.success(), setCo('paid'), reload(), onReserved());
+        else if (status === 'failed') toast('Оплата не прошла. Попробуйте ещё раз');
+      } else {
+        haptic.success();
+        setCo('sent');
+      }
+    } catch (e) {
+      toast((e as Error).message.startsWith('HTTP') ? 'Не получилось оформить. Попробуйте ещё раз' : (e as Error).message);
+      reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** что сейчас делает главная кнопка: купить, оплатить, открыть бота или ничего (бронь) */
+  const action = (() => {
+    if (!l || l.status !== 'active' || !l.price_rub) return null;
+    if (l.reserved_by_me) return { text: 'Контакт продавца — в чате с ботом', run: openBot, active: true };
+    if (co === 'form') return { text: `Оплатить ${formatPrice(l.fee_rub ?? 0)}`, run: pay, active: true };
+    if (co) return { text: 'Открыть чат с ботом', run: openBot, active: true };
+    if (l.reserved) return { text: 'Забронирован', run: () => {}, active: false };
+    return { text: `Купить — ${formatPrice(l.price_rub)}`, run: () => (haptic.medium(), setCo('form')), active: true };
+  })();
+
+  // Главная кнопка Telegram
   useEffect(() => {
-    if (!inTelegram || !l || l.status !== 'active') return;
+    if (!inTelegram || !action) return;
     const mb = tg!.MainButton;
-    const click = async () => {
-      mb.showProgress(true);
-      await onBuy(l);
-      mb.hideProgress();
-    };
-    mb.setParams({
-      text: l.price_rub ? `Купить — ${formatPrice(l.price_rub)}` : 'Написать продавцу',
-      is_visible: true,
-      is_active: true,
-      has_shine_effect: true,
-    });
-    mb.onClick(click);
-    return () => {
-      mb.offClick(click);
-      mb.hide();
-    };
-  }, [l?.id, l?.price_rub, l?.status]);
+    mb.setParams({ text: action.text, is_visible: true, is_active: action.active, has_shine_effect: action.active && !co });
+    if (busy) mb.showProgress(true);
+    else mb.hideProgress();
+    mb.onClick(action.run);
+    return () => mb.offClick(action.run);
+  }, [action?.text, action?.active, busy]);
+  // спрятать кнопку, только когда карточка закрывается или кнопка больше не нужна
+  useEffect(() => (inTelegram && action ? () => tg!.MainButton.hide() : undefined), [!!action]);
 
   const share = async () => {
     if (!l) return;
@@ -100,6 +141,13 @@ export function Detail({ id, preview, botUsername, onClose, onBuy, toast }: Prop
                 </span>
               )}
               {sold && <span class="badge-sold">Продан</span>}
+              {!sold && l.reserved && (
+                <span class="badge-sold">
+                  <IconLock size={13} />
+                  {l.reserved_by_me ? 'Забронирован за вами' : 'Забронирован'}
+                </span>
+              )}
+              <span class="lot-no">Лот №{l.id}</span>
             </div>
             <h1>
               iPhone {l.family ?? l.model_raw}
@@ -170,6 +218,16 @@ export function Detail({ id, preview, botUsername, onClose, onBuy, toast }: Prop
                 <IconChevron size={16} />
               </span>
             </button>
+            <button class="row" onClick={() => (haptic.tap(), openTgLink(`https://t.me/${MANAGER}`))}>
+              <span class="row-icon">
+                <IconQuestion size={18} />
+              </span>
+              <span class="row-label">Вопрос по лоту</span>
+              <span class="row-tail">
+                @{MANAGER}
+                <IconChevron size={16} />
+              </span>
+            </button>
             <button class="row" onClick={share}>
               <span class="row-icon">
                 <IconShare size={18} />
@@ -181,18 +239,10 @@ export function Detail({ id, preview, botUsername, onClose, onBuy, toast }: Prop
             </button>
           </section>
 
-          {!inTelegram && !sold && (
+          {!inTelegram && action && !co && (
             <div class="buy-bar glass-strong">
-              <button
-                class="btn-primary grow big"
-                disabled={buying}
-                onClick={async () => {
-                  setBuying(true);
-                  await onBuy(l);
-                  setBuying(false);
-                }}
-              >
-                {l.price_rub ? `Купить — ${formatPrice(l.price_rub)}` : 'Написать продавцу'}
+              <button class="btn-primary grow big" disabled={!action.active} onClick={action.run}>
+                {action.text}
               </button>
             </div>
           )}
@@ -210,8 +260,28 @@ export function Detail({ id, preview, botUsername, onClose, onBuy, toast }: Prop
       )}
 
       {viewer !== null && <Viewer media={media} start={viewer} onClose={() => setViewer(null)} />}
+
+      {/* лист — в body: у .overlay есть transform, и position: fixed внутри неё не прижмётся к низу экрана */}
+      {l && (
+        <Portal>
+          <Checkout l={l} stage={co} busy={busy} onClose={() => setCo(null)} onPay={pay} onOpenBot={openBot} />
+        </Portal>
+      )}
     </div>
   );
+}
+
+/** Отрисовать содержимое прямо в body — без preact/compat (лишние ~2,5 КБ) */
+function Portal({ children }: { children: ComponentChildren }) {
+  const host = useRef<HTMLDivElement>();
+  if (!host.current) host.current = document.createElement('div');
+  useEffect(() => {
+    const el = host.current!;
+    document.body.appendChild(el);
+    return () => (render(null, el), el.remove());
+  }, []);
+  useEffect(() => render(children, host.current!));
+  return null;
 }
 
 function Spec({ label, value, hint, tone, meter }: { label: string; value: string | null; hint?: string; tone?: string; meter?: number | null }) {

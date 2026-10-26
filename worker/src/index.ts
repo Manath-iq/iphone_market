@@ -1,17 +1,17 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { webhookCallback } from 'grammy';
-import { listingTitle, formatPrice } from '../../shared/parser';
 import type { Env } from './env';
 import { now } from './env';
 import { verifyInitData, type TgUser } from './auth';
-import { getFacets, getListing, getListingRow, listSubscriptions, logEvent, queryListings, upsertUser } from './db';
+import { getFacets, getListing, listSubscriptions, logEvent, queryListings, upsertUser } from './db';
 import { serveMedia, serveTgMedia } from './media';
 import { createBot } from './bot';
-import { catchUpNotifications, sendBuyRequest, sendWeeklyStats } from './notify';
+import { catchUpNotifications, sendWeeklyStats } from './notify';
 import { checkDeleted, importChannel, importReviews, type ReviewsMeta } from './importer';
 import { downloadPending, purgeSoldMedia } from './ingest';
 import { STORE } from './config';
+import { createCheckout, notifyExpiredReservations } from './payments';
 
 /** адрес воркера для ссылок из cron (в обработчиках запросов берём origin из запроса) */
 const PUBLIC_ORIGIN = 'https://raxi-catalog.todominate-ai.workers.dev';
@@ -59,7 +59,7 @@ app.get('/api/listings', async (c) => {
 });
 
 app.get('/api/listings/:id', async (c) => {
-  const l = await getListing(c.env, +c.req.param('id'));
+  const l = await getListing(c.env, +c.req.param('id'), c.get('user')?.id);
   if (!l || l.status === 'hidden') return c.json({ error: 'not found' }, 404);
   return c.json(l);
 });
@@ -81,15 +81,22 @@ app.post('/api/events', async (c) => {
   return c.json({ ok: true });
 });
 
-app.post('/api/buy', async (c) => {
+const CHECKOUT_ERRORS = {
+  not_found: 'Этого телефона уже нет в каталоге',
+  sold: 'Этот телефон уже продан',
+  reserved: 'Этот телефон уже забронирован другим покупателем',
+  mine: 'Вы уже забронировали этот телефон — контакт продавца в чате с ботом',
+  no_price: 'У этого телефона не указана цена — напишите менеджеру',
+  cant_message: 'Не получилось написать вам в чат с ботом. Откройте бота, нажмите «Старт» и попробуйте ещё раз',
+} as const;
+
+// «Оплатить» на экране оформления: счёт ЮKassa для openInvoice или тестовая кнопка в чате с ботом
+app.post('/api/checkout', async (c) => {
   const user = c.get('user')!;
   const { listing_id } = await c.req.json<{ listing_id: number }>();
-  const l = await getListingRow(c.env, listing_id);
-  if (!l) return c.json({ error: 'not found' }, 404);
-  await logEvent(c.env, 'buy_click', user.id, l.id);
-  c.executionCtx.waitUntil(sendBuyRequest(c.env, l, user));
-  const text = `Здравствуйте! Хочу ${listingTitle(l)}${l.price_rub ? ` за ${formatPrice(l.price_rub)}` : ''} (пост ${l.channel_msg_id})`;
-  return c.json({ ok: true, text, url: `https://t.me/${STORE.sellerUsername}?text=${encodeURIComponent(text)}` });
+  const r = await createCheckout(c.env, +listing_id, user);
+  if (!r.ok) return c.json({ error: r.error, message: CHECKOUT_ERRORS[r.error] }, 409);
+  return c.json(r);
 });
 
 app.get('/api/subscriptions', async (c) => c.json({ items: await listSubscriptions(c.env, c.get('user')!.id) }));
@@ -144,11 +151,13 @@ export default {
     }
     ctx.waitUntil(
       (async () => {
-        // бесплатный тариф — 50 подзапросов на запуск: 15 проверок постов + 12 файлов импорта + 8 уведомлений (до 16 запросов, если фото не прошло)
+        // бесплатный тариф — 50 подзапросов на запуск: 15 проверок постов + 12 файлов импорта
+        // + 6 уведомлений подписчикам (до 12 запросов, если фото не прошло) + 3 истёкшие брони (продавец и сотрудники)
         await checkDeleted(env, 15);
         await downloadPending(env, 12);
         // в cron нет запроса, а origin нужен для кнопки «Открыть карточку»
-        await catchUpNotifications(env, PUBLIC_ORIGIN, 8);
+        await catchUpNotifications(env, PUBLIC_ORIGIN, 6);
+        await notifyExpiredReservations(env, 3);
         await purgeSoldMedia(env);
         await env.DB.prepare('DELETE FROM events WHERE created_at < ?').bind(now() - 90 * 86400).run();
         await env.DB.prepare('DELETE FROM media WHERE listing_id IS NULL AND created_at < ?').bind(now() - 86400).run();

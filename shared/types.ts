@@ -55,6 +55,12 @@ export interface Listing {
   created_at: number;
   cover: string | null;
   media?: MediaItem[];
+  /** комиссия площадки внутри price_rub; остаток продавцу = price_rub − fee_rub */
+  fee_rub: number | null;
+  /** забронирован: оплатить его сейчас нельзя */
+  reserved: boolean;
+  /** бронь — за тем, кто смотрит карточку (только в /api/listings/:id) */
+  reserved_by_me?: boolean;
 }
 
 export interface Facets {

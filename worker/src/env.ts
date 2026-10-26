@@ -12,6 +12,8 @@ export interface Env {
   PUBLIC_READ?: string;
   /** шаблон ссылки «Купить лот» под постом, {id} — номер лота; см. appLink в publish.ts */
   APP_LINK?: string;
+  /** токен ЮKassa из BotFather → Payments; пока его нет, оплата работает в тестовом режиме */
+  PAYMENT_PROVIDER_TOKEN?: string;
 }
 
 export const adminIds = (env: Env): number[] =>

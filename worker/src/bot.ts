@@ -10,6 +10,7 @@ import { STORE } from './config';
 import { acceptInvite, isStaff, personLink, touchSeller, type InviteResult } from './roles';
 import { registerStaff } from './bot-staff';
 import { channelKey, postUrl } from './publish';
+import { completePayment, getPayment, holdListing, preCheckout } from './payments';
 import { registerSeller, TEMPLATE_TEXT } from './bot-seller';
 
 interface Deps {
@@ -118,6 +119,41 @@ export function createBot({ env, origin, waitUntil }: Deps) {
       },
     );
     if (ctx.from && (await isStaff(env, ctx.from.id))) await ctx.reply('Команды сотрудника — /help');
+  });
+
+  // ——— Оплата комиссии: ЮKassa через Telegram Payments или тестовый режим ———
+  h.on('pre_checkout_query', async (ctx) => {
+    const q = ctx.preCheckoutQuery;
+    let err: string | null;
+    try {
+      err = await preCheckout(env, q.invoice_payload, q.from.id, q.total_amount);
+    } catch (e) {
+      console.error('pre_checkout failed', e);
+      err = 'Не получилось проверить заказ. Попробуйте ещё раз через минуту — деньги не списаны.';
+    }
+    await ctx.answerPreCheckoutQuery(!err, err ? { error_message: err } : undefined);
+  });
+
+  h.on('message:successful_payment', async (ctx) => {
+    const sp = ctx.message.successful_payment;
+    const id = +(sp.invoice_payload.match(/^pay:(\d+)$/)?.[1] ?? 0);
+    if (id) await completePayment(env, id, sp.telegram_payment_charge_id, sp.provider_payment_charge_id);
+  });
+
+  h.callbackQuery(/^tpay:(\d+)$/, async (ctx) => {
+    if (env.PAYMENT_PROVIDER_TOKEN) return ctx.answerCallbackQuery('Тестовая оплата отключена — оформите покупку заново в каталоге');
+    const pay = await getPayment(env, +ctx.match[1]);
+    if (!pay || pay.buyer_id !== ctx.from.id) return ctx.answerCallbackQuery();
+    if (pay.status === 'paid') return ctx.answerCallbackQuery('Уже оплачено');
+    // та же проверка, что pre_checkout_query при настоящей оплате
+    if (!(await holdListing(env, pay.listing_id, ctx.from.id))) {
+      await ctx.answerCallbackQuery('Телефон уже забронирован или продан');
+      await ctx.editMessageText('Этот телефон уже забронирован или продан — оплата не нужна.').catch(() => {});
+      return;
+    }
+    await ctx.answerCallbackQuery('Оплачено (тест)');
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    await completePayment(env, pay.id, `test:${pay.id}`, null);
   });
 
   // ——— Сотрудники и владелец ———
