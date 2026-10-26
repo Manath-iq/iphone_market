@@ -9,6 +9,7 @@ import { esc, notifySubscribers, sendAdminPreview, toStaff } from './notify';
 import { STORE } from './config';
 import { acceptInvite, isStaff, personLink, touchSeller, type InviteResult } from './roles';
 import { registerStaff } from './bot-staff';
+import { registerSeller, TEMPLATE_TEXT } from './bot-seller';
 
 interface Deps {
   env: Env;
@@ -82,6 +83,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
       const role = invite[1] === 's' ? 'seller' : 'mod';
       const res = await acceptInvite(env, invite[2], role, ctx.from);
       await ctx.reply(inviteReply(res, role), { parse_mode: 'HTML' });
+      if (res.ok && role === 'seller') await ctx.reply(TEMPLATE_TEXT, { parse_mode: 'HTML' });
       if (res.ok) {
         const who = personLink(ctx.from);
         waitUntil(toStaff(env, `👤 ${who} ${role === 'seller' ? 'стал продавцом' : 'стал модератором'} по приглашению.`));
@@ -127,6 +129,9 @@ export function createBot({ env, origin, waitUntil }: Deps) {
   // ——— Сотрудники и владелец ———
   registerStaff(h, { env, origin });
 
+  // ——— Продавцы: подача товаров ———
+  registerSeller(h, { env, waitUntil });
+
   // Всё остальное — кнопка каталога
   h.on('message', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
@@ -142,7 +147,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
 function inviteReply(res: InviteResult, role: 'seller' | 'mod'): string {
   if (res.ok) {
     return role === 'seller'
-      ? `Готово, вы продавец <b>${STORE.name}</b> ✅\n\nСкоро здесь можно будет присылать телефоны на продажу — мы напишем, когда приём откроется.`
+      ? `Готово, вы продавец <b>${STORE.name}</b> ✅`
       : `Готово, вы модератор <b>${STORE.name}</b> ✅\n\nСюда будут приходить новые товары и превью постов канала. Команды — /help`;
   }
   switch (res.reason) {
