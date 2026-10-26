@@ -19,6 +19,8 @@ export interface CaptionOptions {
   lot?: number | null;
   /** ссылка «Купить лот» в мини-апп */
   buyUrl?: string | null;
+  /** товар продан или снят: вместо хэштега — пометка, ссылки «Купить» нет */
+  closed?: 'sold' | 'withdrawn' | null;
 }
 
 const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
@@ -55,7 +57,8 @@ export function buildCaption(f: CaptionFields, o: CaptionOptions): string {
   const pluses = f.pluses.map(stripContacts).filter(Boolean);
   const nuances = f.nuances.map(stripContacts).filter(Boolean);
   const render = () => {
-    const lines = [`📱 ${esc(listingTitle(f))}`, ACTIVE_TAG];
+    const tag = o.closed === 'sold' ? '❌ Продано ❌' : o.closed === 'withdrawn' ? '⛔️ Снято с продажи' : ACTIVE_TAG;
+    const lines = [`📱 ${esc(listingTitle(f))}`, tag];
     if (o.lot) lines.push(`ЛОТ №${o.lot}`);
     lines.push('');
     const condition = f.condition && stripContacts(f.condition);
@@ -68,7 +71,7 @@ export function buildCaption(f: CaptionFields, o: CaptionOptions): string {
     for (const n of nuances) lines.push(`✖️ ${esc(n)}`);
     lines.push('', `💰 ${formatPrice(o.price)}`, '');
     const buy = `Купить лот №${o.lot ?? '…'}`;
-    lines.push(o.lot && o.buyUrl ? `🛒 <a href="${esc(o.buyUrl)}">${buy}</a>` : `🛒 ${buy}`);
+    if (!o.closed) lines.push(o.lot && o.buyUrl ? `🛒 <a href="${esc(o.buyUrl)}">${buy}</a>` : `🛒 ${buy}`);
     lines.push(`❓ Вопрос по лоту — @${MANAGER_USERNAME}`);
     return lines.join('\n');
   };

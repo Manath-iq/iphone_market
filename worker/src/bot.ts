@@ -9,6 +9,7 @@ import { esc, notifySubscribers, sendAdminPreview, toStaff } from './notify';
 import { STORE } from './config';
 import { acceptInvite, isStaff, personLink, touchSeller, type InviteResult } from './roles';
 import { registerStaff } from './bot-staff';
+import { channelKey, postUrl } from './publish';
 import { registerSeller, TEMPLATE_TEXT } from './bot-seller';
 
 interface Deps {
@@ -16,13 +17,6 @@ interface Deps {
   origin: string;
   waitUntil: (p: Promise<unknown>) => void;
 }
-
-const postUrl = (chat: Message['chat'], id: number) =>
-  'username' in chat && chat.username
-    ? `https://t.me/${chat.username}/${id}`
-    : `https://t.me/c/${String(chat.id).replace(/^-100/, '')}/${id}`;
-
-const channelKey = (chat: Message['chat']) => ('username' in chat && chat.username ? chat.username : String(chat.id));
 
 export function createBot({ env, origin, waitUntil }: Deps) {
   const botInfo = {
@@ -127,7 +121,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
   });
 
   // ——— Сотрудники и владелец ———
-  registerStaff(h, { env, origin });
+  registerStaff(h, { env, origin, waitUntil });
 
   // ——— Продавцы: подача товаров ———
   registerSeller(h, { env, waitUntil });

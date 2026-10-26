@@ -1,9 +1,11 @@
 import { Api, InlineKeyboard } from 'grammy';
+import type { InputMediaPhoto, InputMediaVideo } from 'grammy/types';
 import { formatPrice, listingTitle } from '../../shared/parser';
 import type { Env } from './env';
 import { now } from './env';
 import type { ListingRow } from './db';
 import { staffIds } from './roles';
+import type { SubmissionMedia } from './submissions';
 
 export const api = (env: Env) => new Api(env.BOT_TOKEN);
 
@@ -76,30 +78,53 @@ export async function sendBuyRequest(env: Env, l: ListingRow, user: { id: number
   await toStaff(env, `🛒 ${who} нажал «Купить»: <b>${esc(listingTitle(l))}</b>${l.price_rub ? ', ' + formatPrice(l.price_rub) : ''}\n<a href="${l.post_url}">Пост в канале</a>`);
 }
 
-/** Разослать новую карточку подписчикам, у которых совпали модель, память и потолок цены */
-export async function notifySubscribers(env: Env, origin: string, l: ListingRow) {
-  if (l.status !== 'active' || !l.family) return;
+/**
+ * Разослать новую карточку подписчикам, у которых совпали модель, память и потолок цены.
+ * limit держит запуск в бесплатном лимите (50 подзапросов): остальным разошлёт часовой cron (catchUpNotifications) —
+ * кому уже отправили, видно по таблице notifications. Возвращает число отправленных.
+ */
+export async function notifySubscribers(env: Env, origin: string, l: ListingRow, limit = 15): Promise<number> {
+  if (l.status !== 'active' || !l.family) return 0;
   const { results } = await env.DB.prepare(
     `SELECT DISTINCT s.tg_user_id FROM subscriptions s
      WHERE s.active = 1 AND s.family = ?
        AND (s.storage_gb IS NULL OR s.storage_gb = ?)
        AND (s.max_price IS NULL OR ? <= s.max_price)
-       AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.listing_id = ? AND n.tg_user_id = s.tg_user_id)`,
+       AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.listing_id = ? AND n.tg_user_id = s.tg_user_id)
+     LIMIT ?`,
   )
-    .bind(l.family, l.storage_gb, l.price_rub ?? 0, l.id)
+    .bind(l.family, l.storage_gb, l.price_rub ?? 0, l.id, limit)
     .all<{ tg_user_id: number }>();
-  if (!results.length) return;
+  if (!results.length) return 0;
   const kb = new InlineKeyboard().webApp('Открыть карточку', cardUrl(origin, l.id));
   const photo = await coverPhoto(env, origin, l.id);
+  let sent = 0;
   for (const { tg_user_id } of results) {
     const r = await env.DB.prepare('INSERT OR IGNORE INTO notifications (listing_id, tg_user_id, sent_at) VALUES (?, ?, ?)')
       .bind(l.id, tg_user_id, now())
       .run();
     if (!r.meta.changes) continue;
+    sent++;
     await sendCard(env, tg_user_id, `🔔 Появился <b>${esc(shortLine(l))}</b>`, kb, photo).catch((e) =>
       console.warn('notify failed', tg_user_id, String(e)),
     );
   }
+  return sent;
+}
+
+/** Дорассылка подписчикам по карточкам за последние сутки, которым не хватило лимита при публикации */
+export async function catchUpNotifications(env: Env, origin: string, budget = 10) {
+  const { results } = await env.DB.prepare(
+    `SELECT * FROM listings WHERE status = 'active' AND family IS NOT NULL AND created_at > ? ORDER BY created_at DESC LIMIT 20`,
+  )
+    .bind(now() - 86400)
+    .all<ListingRow>();
+  let sent = 0;
+  for (const l of results) {
+    if (sent >= budget) break;
+    sent += await notifySubscribers(env, origin, l, budget - sent);
+  }
+  return { sent };
 }
 
 export async function statsText(env: Env, days = 7): Promise<string> {
@@ -134,4 +159,23 @@ export async function statsText(env: Env, days = 7): Promise<string> {
 
 export async function sendWeeklyStats(env: Env) {
   await toStaff(env, await statsText(env));
+}
+
+/** Альбом с подписью на первом элементе; одно фото или видео — обычным сообщением (в альбоме их минимум 2) */
+export async function sendAlbum(env: Env, chatId: number | string, media: Pick<SubmissionMedia, 'kind' | 'file_id'>[], caption: string) {
+  if (media.length === 1) {
+    const [m] = media;
+    const opts = { caption, parse_mode: 'HTML' as const };
+    return [m.kind === 'video' ? await api(env).sendVideo(chatId, m.file_id, opts) : await api(env).sendPhoto(chatId, m.file_id, opts)];
+  }
+  return api(env).sendMediaGroup(
+    chatId,
+    media.slice(0, 10).map(
+      (m, i): InputMediaPhoto | InputMediaVideo => ({
+        type: m.kind,
+        media: m.file_id,
+        ...(i === 0 ? { caption, parse_mode: 'HTML' as const } : {}),
+      }),
+    ),
+  );
 }

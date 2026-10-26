@@ -10,6 +10,8 @@ export interface Env {
   WEBHOOK_SECRET: string;
   ADMIN_API_KEY: string;
   PUBLIC_READ?: string;
+  /** шаблон ссылки «Купить лот» под постом, {id} — номер лота; см. appLink в publish.ts */
+  APP_LINK?: string;
 }
 
 export const adminIds = (env: Env): number[] =>

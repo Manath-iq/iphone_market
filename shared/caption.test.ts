@@ -61,4 +61,13 @@ describe('buildCaption', () => {
     expect(html.replace(/<[^>]+>/g, '').length).toBeLessThanOrEqual(CAPTION_LIMIT);
     expect(html).toContain('Следы от чехла');
   });
+
+  it('проданный лот: пометка вместо хэштега, без ссылки «Купить», парсер видит продажу', () => {
+    const html = buildCaption(seller, { price: 80000, lot: 12, buyUrl: 'https://t.me/bot?start=l_12', closed: 'sold' });
+    expect(html).toContain('❌ Продано ❌');
+    expect(html).not.toContain('#АКТУАЛЬНО_RaXi');
+    expect(html).not.toContain('Купить лот');
+    expect(parsePost(html).status).toBe('sold');
+    expect(buildCaption(seller, { price: 80000, lot: 12, closed: 'withdrawn' })).toContain('Снято с продажи');
+  });
 });

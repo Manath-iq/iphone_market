@@ -27,6 +27,8 @@ export async function upsertPost(env: Env, post: IncomingPost): Promise<UpsertRe
     .bind(post.channel, post.msg_id)
     .first<ListingRow>();
   if (!existing && !isListingPost(post.text)) return null;
+  // посты товаров продавцов публикует и правит сам бот — правки из канала их не перезаписывают
+  if (existing?.seller_id) return null;
 
   let p = parsePost(post.text);
   if (!p.parse_ok && isListingPost(post.text) && (!existing || existing.raw_text !== post.text)) {

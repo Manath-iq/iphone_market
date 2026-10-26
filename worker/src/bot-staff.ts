@@ -3,18 +3,22 @@ import { formatPrice, listingTitle, plural } from '../../shared/parser';
 import type { Env } from './env';
 import { now } from './env';
 import type { ListingRow } from './db';
-import { setStatus } from './ingest';
-import { esc, statsText } from './notify';
+import { api, esc, notifySubscribers, sendAlbum, statsText } from './notify';
 import { createInvite, isOwner, isStaff, listMods, listSellers, personLink, setModActive, setSellerStatus } from './roles';
 import { getSettings, setSetting } from './settings';
+import { clearState, getState, setState } from './state';
+import { getSubmission, getSubmissionMedia, moveStatus, parsedOf, type SubmissionRow } from './submissions';
+import { modKeyboard, refreshModCards } from './moderation';
+import { applyStatus, publishSubmission, revertPublishing } from './publish';
 
 interface Deps {
   env: Env;
   origin: string;
+  waitUntil: (p: Promise<unknown>) => void;
 }
 
 /** Команды и кнопки владельца и модераторов. Регистрируются на errorBoundary-композере из bot.ts. */
-export function registerStaff(h: Composer<Context>, { env, origin }: Deps) {
+export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: Deps) {
   const botId = +env.BOT_TOKEN.split(':')[0];
   const catalogKb = () => new InlineKeyboard().webApp('📱 Открыть каталог', origin);
 
@@ -67,7 +71,7 @@ export function registerStaff(h: Composer<Context>, { env, origin }: Deps) {
       staffOnly(async (ctx) => {
         const id = parseInt(ctx.match, 10);
         if (!id) return ctx.reply(`Укажите номер карточки: /${cmd} 12. Номера — в /list`);
-        const l = await setStatus(env, id, status);
+        const l = await applyStatus(env, id, status);
         await ctx.reply(l ? `${listingTitle(l)} — ${done}.` : 'Карточка с таким номером не найдена.');
       }),
     );
@@ -85,15 +89,117 @@ export function registerStaff(h: Composer<Context>, { env, origin }: Deps) {
       await ctx.answerCallbackQuery('Отлично, карточка в каталоге');
       kb = open().row().text('🙈 Скрыть', `hide:${id}`);
     } else if (action === 'hide') {
-      await setStatus(env, id, 'hidden');
+      await applyStatus(env, id, 'hidden');
       await ctx.answerCallbackQuery('Скрыто из каталога');
       kb = new InlineKeyboard().text('↩️ Вернуть в каталог', `show:${id}`);
     } else {
-      await setStatus(env, id, 'active');
+      await applyStatus(env, id, 'active');
       await ctx.answerCallbackQuery('Снова в каталоге');
       kb = open().row().text('🙈 Скрыть', `hide:${id}`);
     }
     await ctx.editMessageReplyMarkup({ reply_markup: kb }).catch(() => {});
+  });
+
+  // ——— Модерация заявок продавцов: кто первым нажал, тот и решил ———
+  h.callbackQuery(/^mod_(pub|price|rej|media):(\d+)$/, async (ctx) => {
+    if (!(await isStaff(env, ctx.from.id))) return ctx.answerCallbackQuery();
+    const [, action, idStr] = ctx.match;
+    const id = +idStr;
+    if (action === 'media') {
+      await ctx.answerCallbackQuery();
+      await sendAlbum(env, ctx.from.id, await getSubmissionMedia(env, id), `Заявка №${id}`);
+      return;
+    }
+    if (action === 'pub') {
+      // атомарный захват: из двух модераторов, нажавших одновременно, опубликует один
+      const sub = await moveStatus(env, id, ['pending'], 'publishing');
+      if (!sub) return ctx.answerCallbackQuery('Эту заявку уже решили');
+      await ctx.answerCallbackQuery('Публикую в канал…');
+      const mod = ctx.from;
+      waitUntil(publishAndReport(sub, mod).catch((e) => console.error('publish report failed', id, e)));
+      return;
+    }
+    const sub = await getSubmission(env, id);
+    if (sub?.status !== 'pending') return ctx.answerCallbackQuery('Эту заявку уже решили');
+    await setState(env, ctx.from.id, action === 'rej' ? 'await_reason' : 'await_price', id);
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+      action === 'rej'
+        ? `Напишите причину отказа по заявке №${id} одним сообщением — бот перешлёт её продавцу.`
+        : `Введите новую цену продавца по заявке №${id} числом, например 75000. Комиссию площадки бот добавит сам.`,
+    );
+  });
+
+  async function publishAndReport(sub: SubmissionRow, mod: { id: number; username?: string; first_name?: string }) {
+    const p = parsedOf(sub);
+    const title = esc(p ? listingTitle(p) : 'Телефон');
+    try {
+      const l = await publishSubmission(env, sub, mod.id);
+      await refreshModCards(env, sub.id, `✅ Опубликовал ${personLink(mod)} · <a href="${l.post_url}">лот №${l.id}</a>`);
+      await api(env).sendMessage(
+        sub.seller_id,
+        `✅ Ваш ${title} опубликован — <b>лот №${l.id}</b>.\nЦена для покупателя: ${formatPrice(l.price_rub ?? 0)}.\n\nКогда продадите, отметьте это в /my.`,
+        { parse_mode: 'HTML' },
+      );
+      await notifySubscribers(env, origin, l);
+    } catch (e) {
+      console.error('publish failed', sub.id, e);
+      await revertPublishing(env, sub.id);
+      const why = e instanceof Error ? e.message : String(e);
+      await api(env).sendMessage(
+        mod.id,
+        `Не удалось опубликовать заявку №${sub.id}: ${esc(why)}\n\nПроверьте, что бот — админ канала с правом публикации (/channel), и нажмите «Опубликовать» ещё раз.`,
+      );
+    }
+  }
+
+  // Ответ сотрудника на «Отклонить» (причина) или «Изменить цену» (число)
+  h.on('message:text', async (ctx, next) => {
+    if (ctx.chat.type !== 'private' || ctx.message.text.startsWith('/')) return next();
+    const st = await getState(env, ctx.from.id);
+    if (!st || (st.kind !== 'await_reason' && st.kind !== 'await_price')) return next();
+    if (!(await isStaff(env, ctx.from.id))) return next();
+    const id = st.ref_id;
+    const who = personLink(ctx.from);
+    const text = ctx.message.text.trim();
+
+    if (st.kind === 'await_price') {
+      const price = parseInt(text.replace(/\D/g, ''), 10);
+      if (!price || price < 1000 || price > 1_000_000) return ctx.reply('Не понял цену. Пришлите число в рублях, например 75000.');
+      await clearState(env, ctx.from.id);
+      const sub = await getSubmission(env, id);
+      const p = sub && parsedOf(sub);
+      if (!sub || !p || sub.status !== 'pending') return ctx.reply('Эту заявку уже решили.');
+      await env.DB.prepare('UPDATE submissions SET seller_price_rub = ?, parsed = ? WHERE id = ?')
+        .bind(price, JSON.stringify({ ...p, price_rub: price }), id)
+        .run();
+      const { fee_rub } = await getSettings(env);
+      await refreshModCards(env, id, `💰 ${who} изменил цену продавца`, modKeyboard(id));
+      await ctx.reply(`Готово: цена продавца ${formatPrice(price)}, для покупателя ${formatPrice(price + fee_rub)}.`);
+      await api(env)
+        .sendMessage(
+          sub.seller_id,
+          `Модератор изменил цену по вашей заявке на ${esc(listingTitle(p))}: ваша цена ${formatPrice(price)}, для покупателя ${formatPrice(price + fee_rub)}.`,
+        )
+        .catch((e) => console.warn('seller notify failed', String(e)));
+      return;
+    }
+
+    const reason = text.slice(0, 500);
+    await clearState(env, ctx.from.id);
+    const sub = await moveStatus(env, id, ['pending'], 'rejected');
+    if (!sub) return ctx.reply('Эту заявку уже решили.');
+    await env.DB.prepare('UPDATE submissions SET reject_reason = ?, decided_by = ? WHERE id = ?').bind(reason, ctx.from.id, id).run();
+    await refreshModCards(env, id, `❌ Отклонил ${who}: ${esc(reason)}`);
+    const p = parsedOf(sub);
+    await api(env)
+      .sendMessage(
+        sub.seller_id,
+        `❌ Заявка на ${esc(p ? listingTitle(p) : 'телефон')} отклонена.\n\nПричина: ${esc(reason)}\n\nМожно исправить и прислать альбом заново.`,
+        { parse_mode: 'HTML' },
+      )
+      .catch((e) => console.warn('seller notify failed', String(e)));
+    await ctx.reply('Отклонено, продавец получил причину.');
   });
 
   // ——— Только владелец ———

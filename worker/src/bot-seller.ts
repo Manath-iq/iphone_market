@@ -1,15 +1,17 @@
 import { InlineKeyboard, type Composer, type Context } from 'grammy';
-import type { InputMediaPhoto, InputMediaVideo } from 'grammy/types';
+import type { ListingRow } from './db';
 import { buildCaption, MANAGER_USERNAME, SELLER_TEMPLATE } from '../../shared/caption';
 import { formatPrice, listingTitle, parsePost } from '../../shared/parser';
 import type { ParsedPost } from '../../shared/types';
 import type { Env } from './env';
 import { now } from './env';
 import { llmFallback } from './llm';
-import { api, esc } from './notify';
-import { getSeller, touchSeller } from './roles';
+import { api, esc, sendAlbum, toStaff } from './notify';
+import { getSeller, personLink, touchSeller } from './roles';
 import { getSettings } from './settings';
 import { clearState, getState, setState } from './state';
+import { sendToModeration } from './moderation';
+import { applyStatus } from './publish';
 import {
   addPart,
   claimPreview,
@@ -19,7 +21,6 @@ import {
   recentDraftWithoutText,
   saveParsed,
   setRawText,
-  type SubmissionMedia,
   type SubmissionRow,
 } from './submissions';
 
@@ -105,7 +106,22 @@ export function registerSeller(h: Composer<Context>, { env, waitUntil }: Deps) {
     const seller = await activeSeller(ctx);
     if (!seller) return next();
     if (seller === 'blocked') return ctx.reply(BLOCKED_TEXT);
-    await ctx.reply(await myText(env, ctx.from!.id), { parse_mode: 'HTML' });
+    const { text, kb } = await myView(env, ctx.from!.id);
+    await ctx.reply(text, { parse_mode: 'HTML', reply_markup: kb, link_preview_options: { is_disabled: true } });
+  });
+
+  // «Продан» и «Снять» из /my: бот правит подпись поста в канале, карточка уходит из каталога
+  h.callbackQuery(/^my_(sold|hide):(\d+)$/, async (ctx) => {
+    const [, action, idStr] = ctx.match;
+    const l = await env.DB.prepare('SELECT * FROM listings WHERE id = ?').bind(+idStr).first<ListingRow>();
+    if (!l || l.seller_id !== ctx.from.id || l.status !== 'active') return ctx.answerCallbackQuery('Этот товар уже снят');
+    await applyStatus(env, l.id, action === 'sold' ? 'sold' : 'hidden');
+    await ctx.answerCallbackQuery(action === 'sold' ? 'Отмечено: продан' : 'Снято с продажи');
+    const { text, kb } = await myView(env, ctx.from.id);
+    await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb, link_preview_options: { is_disabled: true } }).catch(() => {});
+    waitUntil(
+      toStaff(env, `${action === 'sold' ? '✅' : '⛔️'} ${personLink(ctx.from)} ${action === 'sold' ? 'отметил проданным' : 'снял с продажи'} <a href="${l.post_url}">лот №${l.id}</a> — ${esc(listingTitle(l))}`),
+    );
   });
 
   // Текст от продавца: подпись к заявке, которую бот попросил, или описание сразу после альбома
@@ -135,6 +151,7 @@ export function registerSeller(h: Composer<Context>, { env, waitUntil }: Deps) {
       const sub = await moveStatus(env, id, ['draft'], 'pending', sellerId);
       if (!sub?.parsed) return ctx.answerCallbackQuery('Эта заявка уже отправлена или отменена');
       await ctx.answerCallbackQuery('Отправлено на проверку');
+      waitUntil(sendToModeration(env, id).catch((e) => console.error('moderation send failed', id, e)));
       await ctx.editMessageText('📤 Отправлено на проверку. Как только модератор опубликует телефон, пришлём номер лота. Ваши товары — /my');
     } else if (action === 'edit') {
       const sub = await getSubmission(env, id);
@@ -210,25 +227,6 @@ export function registerSeller(h: Composer<Context>, { env, waitUntil }: Deps) {
   }
 }
 
-/** Альбом с подписью на первом элементе; одно фото или видео — обычным сообщением (в альбоме их минимум 2) */
-export async function sendAlbum(env: Env, chatId: number | string, media: SubmissionMedia[], caption: string) {
-  if (media.length === 1) {
-    const [m] = media;
-    const opts = { caption, parse_mode: 'HTML' as const };
-    return [m.kind === 'video' ? await api(env).sendVideo(chatId, m.file_id, opts) : await api(env).sendPhoto(chatId, m.file_id, opts)];
-  }
-  return api(env).sendMediaGroup(
-    chatId,
-    media.slice(0, 10).map(
-      (m, i): InputMediaPhoto | InputMediaVideo => ({
-        type: m.kind,
-        media: m.file_id,
-        ...(i === 0 ? { caption, parse_mode: 'HTML' as const } : {}),
-      }),
-    ),
-  );
-}
-
 interface MyRow {
   id: number;
   status: SubmissionRow['status'];
@@ -239,8 +237,9 @@ interface MyRow {
   reserved_until: number | null;
 }
 
-/** /my — заявки и товары продавца со статусами */
-async function myText(env: Env, sellerId: number): Promise<string> {
+/** /my — заявки и товары продавца со статусами; у товаров в каталоге — кнопки «Продан» и «Снять» */
+async function myView(env: Env, sellerId: number): Promise<{ text: string; kb: InlineKeyboard }> {
+  const kb = new InlineKeyboard();
   const { results } = await env.DB.prepare(
     `SELECT s.id, s.status, s.parsed, s.seller_price_rub, l.id AS lot, l.status AS l_status, l.reserved_until
      FROM submissions s LEFT JOIN listings l ON l.id = s.listing_id
@@ -249,7 +248,7 @@ async function myText(env: Env, sellerId: number): Promise<string> {
   )
     .bind(sellerId)
     .all<MyRow>();
-  if (!results.length) return `Пока ничего нет.\n\n${TEMPLATE_TEXT}`;
+  if (!results.length) return { text: `Пока ничего нет.\n\n${TEMPLATE_TEXT}`, kb };
   const ts = now();
   const lines = results.map((r) => {
     const p = r.parsed ? (JSON.parse(r.parsed) as ParsedPost) : null;
@@ -263,8 +262,9 @@ async function myText(env: Env, sellerId: number): Promise<string> {
     } else {
       status = { draft: '✏️ черновик', pending: '⏳ на проверке', publishing: '⏳ публикуется', published: '🟢 опубликован', rejected: '❌ отклонён', cancelled: 'отменён' }[r.status];
     }
+    if (r.lot && r.l_status === 'active') kb.text(`✅ Продан №${r.lot}`, `my_sold:${r.lot}`).text(`⛔️ Снять №${r.lot}`, `my_hide:${r.lot}`).row();
     return `${r.lot ? `<b>Лот №${r.lot}</b> · ` : ''}${title}${price} — ${status}`;
   });
-  return `<b>Ваши товары</b>\n\n${lines.join('\n')}`;
+  return { text: `<b>Ваши товары</b>\n\n${lines.join('\n')}`, kb };
 }
 

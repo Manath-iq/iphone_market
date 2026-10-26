@@ -8,10 +8,13 @@ import { verifyInitData, type TgUser } from './auth';
 import { getFacets, getListing, getListingRow, listSubscriptions, logEvent, queryListings, upsertUser } from './db';
 import { serveMedia, serveTgMedia } from './media';
 import { createBot } from './bot';
-import { sendBuyRequest, sendWeeklyStats } from './notify';
+import { catchUpNotifications, sendBuyRequest, sendWeeklyStats } from './notify';
 import { checkDeleted, importChannel, importReviews, type ReviewsMeta } from './importer';
 import { downloadPending, purgeSoldMedia } from './ingest';
 import { STORE } from './config';
+
+/** адрес воркера для ссылок из cron (в обработчиках запросов берём origin из запроса) */
+const PUBLIC_ORIGIN = 'https://raxi-catalog.todominate-ai.workers.dev';
 
 type Ctx = { Bindings: Env; Variables: { user: TgUser | null } };
 const app = new Hono<Ctx>();
@@ -141,9 +144,11 @@ export default {
     }
     ctx.waitUntil(
       (async () => {
-        // бесплатный тариф — 50 подзапросов на запуск: 15 проверок постов + до 24 запросов на 12 файлов
+        // бесплатный тариф — 50 подзапросов на запуск: 15 проверок постов + 12 файлов импорта + 8 уведомлений (до 16 запросов, если фото не прошло)
         await checkDeleted(env, 15);
         await downloadPending(env, 12);
+        // в cron нет запроса, а origin нужен для кнопки «Открыть карточку»
+        await catchUpNotifications(env, PUBLIC_ORIGIN, 8);
         await purgeSoldMedia(env);
         await env.DB.prepare('DELETE FROM events WHERE created_at < ?').bind(now() - 90 * 86400).run();
         await env.DB.prepare('DELETE FROM media WHERE listing_id IS NULL AND created_at < ?').bind(now() - 86400).run();
