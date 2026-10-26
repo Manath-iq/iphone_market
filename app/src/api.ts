@@ -17,7 +17,8 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 export interface StoreInfo {
   name: string;
   channel: string;
-  seller: string;
+  /** менеджер площадки — вопросы по лотам; ник продавца в API не отдаём */
+  manager: string;
   about: { city: string; delivery: string; warranty: string; payment: string; demo: boolean };
   reviews: { url: string; title: string; subscribers: string | null; photos: string[] } | null;
 }

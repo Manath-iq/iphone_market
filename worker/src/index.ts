@@ -11,6 +11,7 @@ import { catchUpNotifications, sendWeeklyStats } from './notify';
 import { checkDeleted, importChannel, importReviews, type ReviewsMeta } from './importer';
 import { downloadPending, purgeSoldMedia } from './ingest';
 import { STORE } from './config';
+import { MANAGER_USERNAME } from '../../shared/caption';
 import { createCheckout, notifyExpiredReservations } from './payments';
 
 /** адрес воркера для ссылок из cron (в обработчиках запросов берём origin из запроса) */
@@ -68,7 +69,7 @@ app.get('/api/facets', async (c) => c.json(await getFacets(c.env)));
 
 app.get('/api/store', async (c) => {
   const reviews = await c.env.MEDIA.get<ReviewsMeta>('meta:reviews', 'json');
-  return c.json({ name: STORE.name, channel: STORE.channel, seller: STORE.sellerUsername, about: STORE.about, reviews });
+  return c.json({ name: STORE.name, channel: STORE.channel, manager: MANAGER_USERNAME, about: STORE.about, reviews });
 });
 
 const EVENT_TYPES = new Set(['app_open', 'card_view', 'subscribe']);

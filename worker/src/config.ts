@@ -5,7 +5,7 @@ export const STORE = {
   name: 'RaXi Store',
   /** публичный канал, откуда идёт импорт и cron-проверка удалений */
   channel: 'apple_raxi',
-  /** DEMO: в демо «Купить» ведёт на разработчика; у продавца — 'Raxi_Apple' */
+  /** ник, который получает покупатель после оплаты постов владельца. DEMO: разработчик; у заказчика — 'Raxi_Apple' */
   sellerUsername: 'manath',
   reviewsChannel: 'otzv_RaXiStore',
   /** DEMO-ЗАГЛУШКА */

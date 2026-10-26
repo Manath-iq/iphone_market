@@ -138,16 +138,42 @@ export async function statsText(env: Env, days = 7): Promise<string> {
     .all<{ family: string; c: number }>();
   const active = await env.DB.prepare(`SELECT COUNT(*) AS c FROM listings WHERE status = 'active'`).first<{ c: number }>();
   const sold = await env.DB.prepare(`SELECT COUNT(*) AS c FROM listings WHERE sold_at >= ?`).bind(since).first<{ c: number }>();
+  // сделки площадки: оплаченные комиссии, брони без продажи, топ продавцов (ники видят только сотрудники)
+  const pays = await env.DB.prepare(
+    `SELECT COUNT(*) AS c, COALESCE(SUM(amount_rub), 0) AS sum, COALESCE(SUM(mode = 'test'), 0) AS test
+     FROM payments WHERE status = 'paid' AND paid_at >= ?`,
+  )
+    .bind(since)
+    .first<{ c: number; sum: number; test: number }>();
+  const expired = await env.DB.prepare(
+    `SELECT COUNT(*) AS c FROM listings WHERE status = 'active' AND reserve_paid = 1 AND reserve_notified = 1 AND reserved_until >= ?`,
+  )
+    .bind(since)
+    .first<{ c: number }>();
+  const sellers = await env.DB.prepare(
+    `SELECT l.seller_id, s.username, s.first_name, COUNT(*) AS c FROM payments p
+     JOIN listings l ON l.id = p.listing_id LEFT JOIN sellers s ON s.tg_user_id = l.seller_id
+     WHERE p.status = 'paid' AND p.paid_at >= ? GROUP BY l.seller_id ORDER BY c DESC LIMIT 3`,
+  )
+    .bind(since)
+    .all<{ seller_id: number | null; username: string | null; first_name: string | null; c: number }>();
+  const pending = await env.DB.prepare(`SELECT COUNT(*) AS c FROM submissions WHERE status = 'pending'`).first<{ c: number }>();
+  const sellerName = (r: { seller_id: number | null; username: string | null; first_name: string | null }) =>
+    r.seller_id ? (r.username ? `@${esc(r.username)}` : esc(r.first_name ?? String(r.seller_id))) : 'ваши посты в канале';
   const n = (t: string) => by[t]?.c ?? 0;
   return [
     `📊 <b>Статистика за ${days} дней</b>`,
     '',
     `Открытий каталога: <b>${n('app_open')}</b> (${by.app_open?.u ?? 0} чел.)`,
     `Просмотров карточек: <b>${n('card_view')}</b>`,
-    `Нажатий «Купить»: <b>${n('buy_click')}</b> (${by.buy_click?.u ?? 0} чел.)`,
+    `Оформлений покупки: <b>${n('buy_click')}</b> (${by.buy_click?.u ?? 0} чел.)`,
     `Новых подписок: <b>${n('subscribe')}</b>`,
     '',
     `В наличии сейчас: ${active?.c ?? 0} · продано за период: ${sold?.c ?? 0}`,
+    '',
+    `💳 Оплат: <b>${pays?.c ?? 0}</b> на ${formatPrice(pays?.sum ?? 0)}${pays?.test ? ` (из них тестовых: ${pays.test})` : ''}`,
+    `Броней без продажи: ${expired?.c ?? 0} · заявок ждут проверки: ${pending?.c ?? 0}`,
+    sellers.results.length ? `Топ продавцов по оплатам:\n${sellers.results.map((r, i) => `${i + 1}. ${sellerName(r)} — ${r.c}`).join('\n')}` : '',
     top.results.length ? `\nТоп моделей по просмотрам:\n${top.results.map((t, i) => `${i + 1}. iPhone ${esc(t.family)} — ${t.c}`).join('\n')}` : '',
   ].join('\n');
 }

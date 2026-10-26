@@ -9,9 +9,9 @@ import { IconCheck, IconChevron, IconClose, IconInfo, IconLock, IconPaper, IconP
 import { Emoji } from './Emoji';
 import { Img } from './Img';
 import { Checkout, type CheckoutStage } from './Checkout';
+// вопросы по лоту — менеджеру площадки: продавца покупатель до оплаты не видит
+import { MANAGER_USERNAME as MANAGER } from '../../../shared/caption';
 
-/** Вопросы по лоту — менеджеру площадки; продавца покупатель до оплаты не видит */
-const MANAGER = 'Raxi_apple';
 
 interface Props {
   id: number;

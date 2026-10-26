@@ -74,11 +74,11 @@ export function About({ store }: { store: StoreInfo | null }) {
             <IconChevron size={16} />
           </span>
         </button>
-        <button class="row" onClick={() => openTgLink(`https://t.me/${store.seller}`)}>
+        <button class="row" onClick={() => openTgLink(`https://t.me/${store.manager}`)}>
           <span class="row-icon">
             <Emoji name="chat" size={24} />
           </span>
-          Написать продавцу
+          Написать менеджеру
           <span class="row-tail">
             <IconChevron size={16} />
           </span>
