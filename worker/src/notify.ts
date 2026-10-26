@@ -1,14 +1,15 @@
 import { Api, InlineKeyboard } from 'grammy';
 import { formatPrice, listingTitle } from '../../shared/parser';
 import type { Env } from './env';
-import { adminIds, now } from './env';
+import { now } from './env';
 import type { ListingRow } from './db';
+import { staffIds } from './roles';
 
 export const api = (env: Env) => new Api(env.BOT_TOKEN);
 
 export const cardUrl = (origin: string, id: number) => `${origin}/?l=${id}`;
 
-const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
+export const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
 
 export function shortLine(l: ListingRow): string {
   const parts = [listingTitle(l)];
@@ -43,13 +44,14 @@ async function sendCard(env: Env, chatId: number, text: string, keyboard?: Inlin
   await api(env).sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard, link_preview_options: { is_disabled: true } });
 }
 
-async function toAdmins(env: Env, text: string, keyboard?: InlineKeyboard, photo?: string | null) {
+/** Владельцу и модераторам */
+export async function toStaff(env: Env, text: string, keyboard?: InlineKeyboard, photo?: string | null) {
   await Promise.all(
-    adminIds(env).map((id) => sendCard(env, id, text, keyboard, photo).catch((e) => console.warn('admin send failed', id, String(e)))),
+    (await staffIds(env)).map((id) => sendCard(env, id, text, keyboard, photo).catch((e) => console.warn('staff send failed', id, String(e)))),
   );
 }
 
-/** Превью новой карточки продавцу с кнопками подтверждения */
+/** Превью новой карточки из канала сотрудникам с кнопками подтверждения */
 export async function sendAdminPreview(env: Env, origin: string, l: ListingRow) {
   const nuances: string[] = JSON.parse(l.nuances);
   const lines = [
@@ -66,12 +68,12 @@ export async function sendAdminPreview(env: Env, origin: string, l: ListingRow) 
     .text('🙈 Скрыть', `hide:${l.id}`)
     .row()
     .webApp('Открыть в каталоге', cardUrl(origin, l.id));
-  await toAdmins(env, lines.join('\n'), kb, await coverPhoto(env, origin, l.id));
+  await toStaff(env, lines.join('\n'), kb, await coverPhoto(env, origin, l.id));
 }
 
 export async function sendBuyRequest(env: Env, l: ListingRow, user: { id: number; username?: string; first_name?: string }) {
   const who = user.username ? `@${esc(user.username)}` : `<a href="tg://user?id=${user.id}">${esc(user.first_name ?? 'Покупатель')}</a>`;
-  await toAdmins(env, `🛒 ${who} нажал «Купить»: <b>${esc(listingTitle(l))}</b>${l.price_rub ? ', ' + formatPrice(l.price_rub) : ''}\n<a href="${l.post_url}">Пост в канале</a>`);
+  await toStaff(env, `🛒 ${who} нажал «Купить»: <b>${esc(listingTitle(l))}</b>${l.price_rub ? ', ' + formatPrice(l.price_rub) : ''}\n<a href="${l.post_url}">Пост в канале</a>`);
 }
 
 /** Разослать новую карточку подписчикам, у которых совпали модель, память и потолок цены */
@@ -131,5 +133,5 @@ export async function statsText(env: Env, days = 7): Promise<string> {
 }
 
 export async function sendWeeklyStats(env: Env) {
-  await toAdmins(env, await statsText(env));
+  await toStaff(env, await statsText(env));
 }

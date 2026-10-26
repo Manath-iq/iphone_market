@@ -1,12 +1,14 @@
-import { Bot, InlineKeyboard, type CommandContext, type Context, type NextFunction } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 import type { Message, UserFromGetMe } from 'grammy/types';
 import { formatPrice, listingTitle, plural } from '../../shared/parser';
 import type { Env } from './env';
-import { adminIds, now } from './env';
+import { now } from './env';
 import type { ListingRow } from './db';
-import { addMedia, downloadPending, setStatus, upsertPost } from './ingest';
-import { notifySubscribers, sendAdminPreview, statsText } from './notify';
+import { addMedia, downloadPending, upsertPost } from './ingest';
+import { esc, notifySubscribers, sendAdminPreview, toStaff } from './notify';
 import { STORE } from './config';
+import { acceptInvite, isStaff, personLink, touchSeller, type InviteResult } from './roles';
+import { registerStaff } from './bot-staff';
 
 interface Deps {
   env: Env;
@@ -35,8 +37,6 @@ export function createBot({ env, origin, waitUntil }: Deps) {
   // На вебхуке bot.catch не срабатывает: ошибка превращается в 500, и Telegram повторяет апдейт снова и снова
   // (дубли карточек, заявок, уведомлений). Поэтому все обработчики — за errorBoundary, ответ всегда 200.
   const h = bot.errorBoundary((err) => console.error('bot error', err.error));
-  const admins = adminIds(env);
-  const isAdmin = (ctx: Context) => !!ctx.from && admins.includes(ctx.from.id);
   const catalogKb = () => new InlineKeyboard().webApp('📱 Открыть каталог', origin);
 
   // ——— Канал: новые посты и правки ———
@@ -76,25 +76,20 @@ export function createBot({ env, origin, waitUntil }: Deps) {
   h.on('channel_post', (ctx) => handleChannelMessage(ctx.channelPost, false));
   h.on('edited_channel_post', (ctx) => handleChannelMessage(ctx.editedChannelPost, true));
 
-  const esc = (t: string) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
-  /** админские команды: не-админу отдаём то же, что на любое сообщение, — кнопку каталога */
-  const adminOnly =
-    (fn: (ctx: CommandContext<Context>) => Promise<unknown>) =>
-    (ctx: CommandContext<Context>, next: NextFunction) =>
-      isAdmin(ctx) ? fn(ctx) : next();
-  const ADMIN_HELP = [
-    '<b>Команды продавца</b>',
-    '/list — что сейчас в каталоге',
-    '/stats — статистика за 7 дней',
-    '/sold 12 — снять как проданный',
-    '/hide 12 — скрыть',
-    '/show 12 — вернуть в каталог',
-    '',
-    'Новые посты с #АКТУАЛЬНО_RaXi попадают в каталог сами, а замена хэштега на «Продано» снимает карточку.',
-  ].join('\n');
-
   // ——— Покупатель ———
   h.command('start', async (ctx) => {
+    // приглашение: t.me/<бот>?start=s_<код> — продавец, m_<код> — модератор
+    const invite = ctx.match.match(/^([sm])_([\w-]{6,})$/);
+    if (invite && ctx.from) {
+      const role = invite[1] === 's' ? 'seller' : 'mod';
+      const res = await acceptInvite(env, invite[2], role, ctx.from);
+      await ctx.reply(inviteReply(res, role), { parse_mode: 'HTML' });
+      if (res.ok) {
+        const who = personLink(ctx.from);
+        waitUntil(toStaff(env, `👤 ${who} ${role === 'seller' ? 'стал продавцом' : 'стал модератором'} по приглашению.`));
+      }
+      return;
+    }
     // ссылка «Поделиться» из карточки: t.me/<бот>?start=l_12
     const shared = ctx.match.match(/^l_(\d+)$/);
     if (shared) {
@@ -128,83 +123,40 @@ export function createBot({ env, origin, waitUntil }: Deps) {
         reply_markup: new InlineKeyboard().webApp('📱 Открыть каталог', origin).row().webApp('🔔 Сообщить о поступлении', `${origin}/?tab=subs`),
       },
     );
-    if (isAdmin(ctx)) await ctx.reply(ADMIN_HELP, { parse_mode: 'HTML' });
+    if (ctx.from && (await isStaff(env, ctx.from.id))) await ctx.reply('Команды сотрудника — /help');
   });
 
-  // ——— Продавец ———
-  h.command(
-    'help',
-    adminOnly((ctx) => ctx.reply(ADMIN_HELP, { parse_mode: 'HTML' })),
-  );
-
-  h.command(
-    'list',
-    adminOnly(async (ctx) => {
-      const { results } = await env.DB.prepare(`SELECT * FROM listings WHERE status = 'active' ORDER BY created_at DESC`).all<ListingRow>();
-      if (!results.length) return ctx.reply('Сейчас в каталоге пусто.');
-      const lines = results.map((l) => {
-        const days = Math.max(0, Math.floor((now() - l.created_at) / 86400));
-        const age = days === 0 ? 'сегодня' : `${days} ${plural(days, 'день', 'дня', 'дней')}`;
-        return `<code>${l.id}</code> · <a href="${l.post_url}">${esc(listingTitle(l))}</a> — ${l.price_rub ? formatPrice(l.price_rub) : '?'} · ${age}${l.parse_ok ? '' : ' ⚠️'}`;
-      });
-      const warn = results.some((l) => !l.parse_ok) ? '\n\n⚠️ — пост разобран не полностью, проверьте карточку' : '';
-      await ctx.reply(`<b>В наличии: ${results.length}</b>\n\n${lines.join('\n')}${warn}`, {
-        parse_mode: 'HTML',
-        link_preview_options: { is_disabled: true },
-        reply_markup: catalogKb(),
-      });
-    }),
-  );
-
-  h.command(
-    'stats',
-    adminOnly(async (ctx) => ctx.reply(await statsText(env), { parse_mode: 'HTML' })),
-  );
-
-  for (const [cmd, status, done] of [
-    ['sold', 'sold', 'снят как проданный'],
-    ['hide', 'hidden', 'скрыт из каталога'],
-    ['show', 'active', 'снова в каталоге'],
-  ] as const) {
-    h.command(
-      cmd,
-      adminOnly(async (ctx) => {
-        const id = parseInt(ctx.match, 10);
-        if (!id) return ctx.reply(`Укажите номер карточки: /${cmd} 12. Номера — в /list`);
-        const l = await setStatus(env, id, status);
-        await ctx.reply(l ? `${listingTitle(l)} — ${done}.` : 'Карточка с таким номером не найдена.');
-      }),
-    );
-  }
-
-  h.callbackQuery(/^(ok|hide|show):(\d+)$/, async (ctx) => {
-    if (!isAdmin(ctx)) return ctx.answerCallbackQuery();
-    const [, action, idStr] = ctx.match;
-    const id = +idStr;
-    const open = () => new InlineKeyboard().webApp('Открыть в каталоге', `${origin}/?l=${id}`);
-    let kb: InlineKeyboard;
-    if (action === 'ok') {
-      await env.DB.prepare('UPDATE listings SET confirmed = 1, parse_ok = 1 WHERE id = ?').bind(id).run();
-      await ctx.answerCallbackQuery('Отлично, карточка в каталоге');
-      kb = open().row().text('🙈 Скрыть', `hide:${id}`);
-    } else if (action === 'hide') {
-      await setStatus(env, id, 'hidden');
-      await ctx.answerCallbackQuery('Скрыто из каталога');
-      kb = new InlineKeyboard().text('↩️ Вернуть в каталог', `show:${id}`);
-    } else {
-      await setStatus(env, id, 'active');
-      await ctx.answerCallbackQuery('Снова в каталоге');
-      kb = open().row().text('🙈 Скрыть', `hide:${id}`);
-    }
-    await ctx.editMessageReplyMarkup({ reply_markup: kb }).catch(() => {});
-  });
+  // ——— Сотрудники и владелец ———
+  registerStaff(h, { env, origin });
 
   // Всё остальное — кнопка каталога
   h.on('message', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
-    if (isAdmin(ctx) && ctx.message.text?.startsWith('/')) return ctx.reply(ADMIN_HELP, { parse_mode: 'HTML' });
+    // ник продавца мог смениться — а выдаём покупателю именно его
+    waitUntil(touchSeller(env, ctx.from));
+    if (ctx.message.text?.startsWith('/') && (await isStaff(env, ctx.from.id))) return ctx.reply('Такой команды нет. Список — /help');
     await ctx.reply('Все телефоны в наличии — в каталоге 👇', { reply_markup: catalogKb() });
   });
 
   return bot;
+}
+
+function inviteReply(res: InviteResult, role: 'seller' | 'mod'): string {
+  if (res.ok) {
+    return role === 'seller'
+      ? `Готово, вы продавец <b>${STORE.name}</b> ✅\n\nСкоро здесь можно будет присылать телефоны на продажу — мы напишем, когда приём откроется.`
+      : `Готово, вы модератор <b>${STORE.name}</b> ✅\n\nСюда будут приходить новые товары и превью постов канала. Команды — /help`;
+  }
+  switch (res.reason) {
+    case 'no_username':
+      return 'Чтобы покупатели могли вам написать, задайте имя пользователя: Настройки → Имя пользователя. Потом откройте ссылку ещё раз — она по-прежнему действует.';
+    case 'already':
+      return role === 'seller' ? 'Вы уже продавец — повторно ничего делать не нужно.' : 'Вы уже модератор.';
+    case 'used':
+      return 'Эта ссылка уже использована. Попросите новую у владельца.';
+    case 'expired':
+      return 'Срок ссылки истёк — она действует 24 часа. Попросите новую у владельца.';
+    default:
+      return 'Ссылка недействительна. Попросите новую у владельца.';
+  }
 }

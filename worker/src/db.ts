@@ -29,10 +29,18 @@ export interface ListingRow {
   created_at: number;
   updated_at: number;
   sold_at: number | null;
+  /** продавец площадки; NULL — пост владельца в канале. Никогда не отдаётся в API мини-аппа */
+  seller_id: number | null;
+  seller_price_rub: number | null;
+  fee_rub: number | null;
+  fee_in_post: number;
+  reserved_until: number | null;
+  reserved_by: number | null;
 }
 
 export const mediaUrl = (key: string) => `/media/${key}`;
 
+/** Карточка для мини-аппа: поля перечислены явно, чтобы данные продавца не утекли в API */
 export function toListing(r: ListingRow & { cover_key?: string | null; old_price?: number | null }): Listing {
   return {
     id: r.id,
