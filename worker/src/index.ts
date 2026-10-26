@@ -1,3 +1,4 @@
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { webhookCallback } from 'grammy';
 import { listingTitle, formatPrice } from '../../shared/parser';
@@ -5,7 +6,7 @@ import type { Env } from './env';
 import { now } from './env';
 import { verifyInitData, type TgUser } from './auth';
 import { getFacets, getListing, getListingRow, listSubscriptions, logEvent, queryListings, upsertUser } from './db';
-import { serveMedia } from './media';
+import { serveMedia, serveTgMedia } from './media';
 import { createBot } from './bot';
 import { sendBuyRequest, sendWeeklyStats } from './notify';
 import { checkDeleted, importChannel, importReviews, type ReviewsMeta } from './importer';
@@ -22,6 +23,9 @@ app.post('/bot', (c) => {
 });
 
 // ——— Медиа ———
+// Файлы из Telegram идут через MediaCache: перед этой точкой входа стоит Workers Caching (см. wrangler.toml),
+// поэтому повторные запросы и куски видео отдаются из кэша, а воркер и Telegram не вызываются
+app.get('/media/f/:id{[0-9]+}', (c) => (c.executionCtx.exports as unknown as { MediaCache: Fetcher }).MediaCache.fetch(c.req.raw));
 app.get('/media/*', (c) => serveMedia(c.env, decodeURIComponent(c.req.path.slice('/media/'.length)), c.req.raw));
 
 // ——— API: подпись initData проверяется на каждом запросе ———
@@ -119,6 +123,14 @@ app.post('/admin/media', async (c) => c.json(await downloadPending(c.env, 20)));
 app.post('/admin/reviews', async (c) => c.json(await importReviews(c.env)));
 app.post('/admin/check', async (c) => c.json(await checkDeleted(c.env)));
 app.post('/admin/purge', async (c) => c.json(await purgeSoldMedia(c.env, num(c.req.query('days')) ?? 7)));
+
+/** Кэшируемая точка входа только для медиа из Telegram. Остальной воркер (API, бот) без кэша. */
+export class MediaCache extends WorkerEntrypoint<Env> {
+  async fetch(req: Request) {
+    const id = +(new URL(req.url).pathname.match(/^\/media\/f\/(\d+)$/)?.[1] ?? 0);
+    return id ? serveTgMedia(this.env, id) : new Response(null, { status: 404, headers: { 'cache-control': 'no-store' } });
+  }
+}
 
 export default {
   fetch: app.fetch,

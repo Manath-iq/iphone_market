@@ -24,6 +24,19 @@ id = "33ea1c0427ce467eab10a9c37c312cf8"
 [ai]
 binding = "AI"
 
+# Workers Caching — только для медиа из Telegram (точка входа MediaCache, маршрут /media/f/<id>).
+# Основная точка входа без кэша: иначе Cloudflare закэшировал бы ответы /api/* и считал запросы к статике.
+# Файлы по одному id не меняются, поэтому кэш переживает деплои (cross_version_cache).
+[cache]
+enabled = false
+cross_version_cache = true
+
+[exports.MediaCache]
+type = "worker"
+
+  [exports.MediaCache.cache]
+  enabled = true
+
 [triggers]
 # каждый час — проверка удалённых постов и докачка медиа; пн 07:00 UTC = 10:00 МСК — статистика
 crons = ["0 * * * *", "0 7 * * 1"]

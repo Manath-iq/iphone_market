@@ -4,7 +4,7 @@ import { formatPrice, listingTitle, plural } from '../../shared/parser';
 import type { Env } from './env';
 import { now } from './env';
 import type { ListingRow } from './db';
-import { addMedia, downloadPending, upsertPost } from './ingest';
+import { addMedia, upsertPost } from './ingest';
 import { esc, notifySubscribers, sendAdminPreview, toStaff } from './notify';
 import { STORE } from './config';
 import { acceptInvite, isStaff, personLink, touchSeller, type InviteResult } from './roles';
@@ -69,8 +69,6 @@ export function createBot({ env, origin, waitUntil }: Deps) {
         waitUntil(notifySubscribers(env, origin, res.listing));
       }
     }
-    // качаем файлы в фоне, чтобы быстро ответить Telegram
-    waitUntil(downloadPending(env, 10));
   }
 
   h.on('channel_post', (ctx) => handleChannelMessage(ctx.channelPost, false));

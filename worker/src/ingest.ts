@@ -115,6 +115,14 @@ export async function addMedia(env: Env, m: IncomingMedia): Promise<number | nul
   )
     .bind(m.channel, m.media_group_id, m.msg_id, m.kind, m.source, m.file_size ?? null, m.width ?? null, m.height ?? null, m.msg_id, now())
     .run();
+  // Файлы из Telegram не копируем: карточка показывает их по file_id через /media/f/<id>
+  if (m.source.startsWith('tg:')) {
+    await env.DB.prepare(
+      `UPDATE media SET storage_key = 'f/' || id WHERE source_channel = ? AND msg_id = ? AND kind = ? AND storage_key IS NULL`,
+    )
+      .bind(m.channel, m.msg_id, m.kind)
+      .run();
+  }
   const listing = await env.DB.prepare(
     `SELECT * FROM listings WHERE source_channel = ? AND (channel_msg_id = ? OR (media_group_id IS NOT NULL AND media_group_id = ?))`,
   )
@@ -135,16 +143,17 @@ async function attachGroupMedia(env: Env, l: ListingRow) {
 }
 
 /**
- * Скачать в хранилище файлы привязанных карточек. limit — чтобы уложиться в лимит подзапросов воркера
- * (на файл из Telegram уходит 2 запроса). Файлы сначала «захватываются» одним UPDATE, поэтому параллельные
- * вызовы от апдейтов одного альбома не качают одно и то же; зависший захват освобождается через 5 минут.
+ * Скачать в KV файлы импорта с публичной ленты (у них нет file_id). Файлы из Telegram сюда не попадают —
+ * их отдаёт /media/f/<id>. limit — чтобы уложиться в лимит подзапросов воркера (запрос на файл).
+ * Файлы сначала «захватываются» одним UPDATE, поэтому параллельные вызовы не качают одно и то же;
+ * зависший захват освобождается через 5 минут.
  */
 export async function downloadPending(env: Env, limit = 30): Promise<{ done: number; remaining: number }> {
   const ts = now();
   const { results } = await env.DB.prepare(
     `UPDATE media SET claimed_at = ? WHERE id IN (
        SELECT id FROM media
-       WHERE listing_id IS NOT NULL AND storage_key IS NULL AND (claimed_at IS NULL OR claimed_at < ?)
+       WHERE listing_id IS NOT NULL AND storage_key IS NULL AND source NOT LIKE 'tg:%' AND (claimed_at IS NULL OR claimed_at < ?)
          AND listing_id NOT IN (SELECT id FROM listings WHERE status = 'sold')
        ORDER BY listing_id DESC, position LIMIT ?)
      RETURNING id, source_channel, msg_id, kind, source, file_size`,
@@ -158,19 +167,12 @@ export async function downloadPending(env: Env, limit = 30): Promise<{ done: num
     let stored: string = 'skip';
     try {
       if (m.file_size && m.file_size > TG_FILE_LIMIT) throw new Error('too big');
-      let url = m.source;
-      if (m.source.startsWith('tg:')) {
-        const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${m.source.slice(3)}`);
-        const j = (await r.json()) as { ok: boolean; result?: { file_path: string } };
-        if (!j.ok || !j.result) throw new Error('getFile failed');
-        url = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${j.result.file_path}`;
-      }
-      const res = await fetch(url);
+      const res = await fetch(m.source);
       if (!res.ok) throw new Error(`fetch ${res.status}`);
       const len = +(res.headers.get('content-length') ?? 0);
       if (len > TG_FILE_LIMIT) throw new Error('too big');
       const body = await res.arrayBuffer();
-      // Bot API отдаёт файлы как application/octet-stream — тип ставим сами
+      // тип ставим сами: CDN может отдать application/octet-stream
       const ct = res.headers.get('content-type') ?? '';
       await store.put(key, body, m.kind === 'video' ? 'video/mp4' : ct.startsWith('image/') ? ct : 'image/jpeg');
       stored = key;
@@ -182,7 +184,7 @@ export async function downloadPending(env: Env, limit = 30): Promise<{ done: num
     await env.DB.prepare('UPDATE media SET storage_key = ? WHERE id = ?').bind(stored, m.id).run();
   }
   const rest = await env.DB.prepare(
-    `SELECT COUNT(*) AS c FROM media WHERE listing_id IS NOT NULL AND storage_key IS NULL
+    `SELECT COUNT(*) AS c FROM media WHERE listing_id IS NOT NULL AND storage_key IS NULL AND source NOT LIKE 'tg:%'
        AND listing_id NOT IN (SELECT id FROM listings WHERE status = 'sold')`,
   ).first<{ c: number }>();
   return { done, remaining: rest?.c ?? 0 };
@@ -197,6 +199,7 @@ export async function purgeSoldMedia(env: Env, days = 7, limit = 20): Promise<{ 
   const { results } = await env.DB.prepare(
     `SELECT m.id, m.storage_key FROM media m JOIN listings l ON l.id = m.listing_id
      WHERE l.status = 'sold' AND l.sold_at < ? AND m.storage_key IS NOT NULL AND m.storage_key != 'skip'
+       AND m.storage_key NOT LIKE 'f/%'
      LIMIT ?`,
   )
     .bind(now() - days * 86400, limit)
