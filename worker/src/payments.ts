@@ -70,23 +70,10 @@ export async function createCheckout(env: Env, listingId: number, buyer: Person)
       'RUB',
       [{ label: 'Услуги площадки', amount }],
       {
+        // email покупатель вводит в форме оплаты — на него придёт чек
         need_email: true,
         send_email_to_provider: true,
-        // чек 54-ФЗ формирует ЮKassa по этим данным; email покупатель вводит в форме оплаты
-        provider_data: JSON.stringify({
-          receipt: {
-            items: [
-              {
-                description: `Услуги площадки, лот №${l.id}`,
-                quantity: '1.00',
-                amount: { value: l.fee_rub.toFixed(2), currency: 'RUB' },
-                vat_code: 1,
-                payment_mode: 'full_payment',
-                payment_subject: 'service',
-              },
-            ],
-          },
-        }),
+        ...(env.RECEIPT_MODE === '54fz' ? { provider_data: JSON.stringify(receipt54fz(l.id, l.fee_rub)) } : {}),
       },
     );
     return { ok: true, mode: 'invoice', url };
@@ -111,6 +98,27 @@ export async function createCheckout(env: Env, listingId: number, buyer: Person)
     return { ok: false, error: 'cant_message' };
   }
   return { ok: true, mode: 'test' };
+}
+
+/**
+ * Данные кассового чека по 54-ФЗ — только для ИП или ООО с онлайн-кассой в ЮKassa (RECEIPT_MODE=54fz).
+ * Заказчик — самозанятый: его чек формирует «Мой налог», ЮKassa отправляет его сама, поэтому по умолчанию не передаём.
+ */
+function receipt54fz(lot: number, feeRub: number) {
+  return {
+    receipt: {
+      items: [
+        {
+          description: `Услуги площадки, лот №${lot}`,
+          quantity: '1.00',
+          amount: { value: feeRub.toFixed(2), currency: 'RUB' },
+          vat_code: 1,
+          payment_mode: 'full_payment',
+          payment_subject: 'service',
+        },
+      ],
+    },
+  };
 }
 
 export async function getPayment(env: Env, id: number) {

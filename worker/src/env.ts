@@ -14,6 +14,8 @@ export interface Env {
   APP_LINK?: string;
   /** токен ЮKassa из BotFather → Payments; пока его нет, оплата работает в тестовом режиме */
   PAYMENT_PROVIDER_TOKEN?: string;
+  /** чек в счёте: npd (по умолчанию) — самозанятый, чек из «Мой налог»; 54fz — ИП/ООО, данные кассового чека для ЮKassa */
+  RECEIPT_MODE?: 'npd' | '54fz';
 }
 
 export const adminIds = (env: Env): number[] =>
