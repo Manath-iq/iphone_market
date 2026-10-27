@@ -4,7 +4,9 @@ import type { Env } from './env';
 import { now } from './env';
 import type { ListingRow } from './db';
 import { api, esc, notifySubscribers, sendAlbum, statsText } from './notify';
-import { createInvite, isOwner, isStaff, listMods, listSellers, personLink, setModActive, setSellerStatus } from './roles';
+import {
+  createInvite, getStaff, isMainOwner, isOwner, isStaff, listMods, listSellers, personLink, setModActive, setSellerStatus,
+} from './roles';
 import { syncCommands } from './commands';
 import { getSettings, setSetting } from './settings';
 import { clearState, getState, setState } from './state';
@@ -31,12 +33,12 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
       ctx.from && (await isStaff(env, ctx.from.id)) ? fn(ctx) : next();
   const ownerOnly =
     (fn: (ctx: CommandContext<Context>) => Promise<unknown>) =>
-    (ctx: CommandContext<Context>, next: NextFunction) =>
-      ctx.from && isOwner(env, ctx.from.id) ? fn(ctx) : next();
+    async (ctx: CommandContext<Context>, next: NextFunction) =>
+      ctx.from && (await isOwner(env, ctx.from.id)) ? fn(ctx) : next();
 
   h.command(
     'help',
-    staffOnly(async (ctx) => ctx.reply(await helpText(env, isOwner(env, ctx.from!.id)), { parse_mode: 'HTML' })),
+    staffOnly(async (ctx) => ctx.reply(await helpText(env, await isOwner(env, ctx.from!.id)), { parse_mode: 'HTML' })),
   );
 
   h.command(
@@ -219,6 +221,7 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
   for (const [cmd, role, prefix, who] of [
     ['invite', 'seller', 's', 'продавца'],
     ['invite_mod', 'mod', 'm', 'модератора'],
+    ['invite_admin', 'owner', 'a', 'владельца — у него будут все ваши команды'],
   ] as const) {
     h.command(
       cmd,
@@ -247,7 +250,7 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
     }),
   );
   h.callbackQuery(/^s(on|off):(\d+)$/, async (ctx) => {
-    if (!isOwner(env, ctx.from.id)) return ctx.answerCallbackQuery();
+    if (!(await isOwner(env, ctx.from.id))) return ctx.answerCallbackQuery();
     const s = await setSellerStatus(env, +ctx.match[2], ctx.match[1] === 'on' ? 'active' : 'blocked');
     waitUntil(syncCommands(env, +ctx.match[2]));
     await ctx.answerCallbackQuery(s ? (s.status === 'active' ? 'Продавец включён' : 'Продавец отключён') : 'Не найден');
@@ -258,16 +261,22 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
   h.command(
     'mods',
     ownerOnly(async (ctx) => {
-      const { text, kb } = await modsView(env);
+      const { text, kb } = await modsView(env, ctx.from!.id);
       await ctx.reply(text, { parse_mode: 'HTML', reply_markup: kb });
     }),
   );
   h.callbackQuery(/^m(on|off):(\d+)$/, async (ctx) => {
-    if (!isOwner(env, ctx.from.id)) return ctx.answerCallbackQuery();
+    if (!(await isOwner(env, ctx.from.id))) return ctx.answerCallbackQuery();
+    // владельца по ссылке включает и отключает только главный владелец из ADMIN_IDS
+    const target = await getStaff(env, +ctx.match[2]);
+    if (target?.role === 'owner' && !isMainOwner(env, ctx.from.id)) {
+      return ctx.answerCallbackQuery('Владельца может отключить только главный владелец');
+    }
     const m = await setModActive(env, +ctx.match[2], ctx.match[1] === 'on');
     waitUntil(syncCommands(env, +ctx.match[2]));
-    await ctx.answerCallbackQuery(m ? (m.active ? 'Модератор включён' : 'Модератор отключён') : 'Не найден');
-    const { text, kb } = await modsView(env);
+    const who = m?.role === 'owner' ? 'Владелец' : 'Модератор';
+    await ctx.answerCallbackQuery(m ? `${who} ${m.active ? 'включён' : 'отключён'}` : 'Не найден');
+    const { text, kb } = await modsView(env, ctx.from.id);
     await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb }).catch(() => {});
   });
 
@@ -349,8 +358,9 @@ async function helpText(env: Env, owner: boolean): Promise<string> {
       '<b>Владельцу</b>',
       '/invite — ссылка для нового продавца',
       '/invite_mod — ссылка для модератора',
+      '/invite_admin — ссылка для владельца: у него будут все эти команды',
       '/sellers — продавцы, отключить или включить',
-      '/mods — модераторы',
+      '/mods — модераторы и владельцы',
       `/fee — комиссия площадки, сейчас ${formatPrice(s.fee_rub)}`,
       `/fee_mode — ваши посты: ${feeModeText(s.owner_fee_mode)}`,
       `/channel — куда публиковать товары, сейчас «${esc(s.publish_chat_title)}»`,
@@ -374,16 +384,21 @@ async function sellersView(env: Env) {
   return { text: `<b>Продавцы</b> — активных ${active} из ${list.length}\n\n${lines.join('\n')}`, kb };
 }
 
-async function modsView(env: Env) {
+/** Модераторы и владельцы по ссылке. Кнопки у владельцев видит только главный владелец (viewerId из ADMIN_IDS). */
+async function modsView(env: Env, viewerId: number) {
   const list = await listMods(env);
   const kb = new InlineKeyboard();
-  if (!list.length) return { text: 'Модераторов пока нет. Пригласить: /invite_mod', kb };
+  if (!list.length) return { text: 'Модераторов пока нет. Пригласить: /invite_mod, владельца — /invite_admin', kb };
+  const main = isMainOwner(env, viewerId);
   const lines = list.map((m) => {
     const who = personLink({ id: m.tg_user_id, username: m.username, first_name: m.first_name });
     const name = m.username ? `@${m.username}` : (m.first_name ?? String(m.tg_user_id));
-    if (m.active) kb.text(`🚫 Отключить ${name}`, `moff:${m.tg_user_id}`).row();
-    else kb.text(`✅ Включить ${name}`, `mon:${m.tg_user_id}`).row();
-    return `${m.active ? '🟢' : '⚪️'} ${who}`;
+    const owner = m.role === 'owner';
+    if (!owner || main) {
+      if (m.active) kb.text(`🚫 Отключить ${name}`, `moff:${m.tg_user_id}`).row();
+      else kb.text(`✅ Включить ${name}`, `mon:${m.tg_user_id}`).row();
+    }
+    return `${m.active ? '🟢' : '⚪️'} ${who}${owner ? ' — 👑 владелец' : ''}`;
   });
-  return { text: `<b>Модераторы</b>\n\n${lines.join('\n')}`, kb };
+  return { text: `<b>Модераторы и владельцы</b>\n\n${lines.join('\n')}`, kb };
 }

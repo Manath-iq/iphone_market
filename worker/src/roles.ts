@@ -2,7 +2,8 @@ import type { Env } from './env';
 import { adminIds, now } from './env';
 
 /**
- * Роли площадки. Владелец — из секрета ADMIN_IDS, модераторы и продавцы — строки в D1.
+ * Роли площадки. Главный владелец — из секрета ADMIN_IDS. Владельцы по ссылке, модераторы и продавцы — строки в D1
+ * (владельцы и модераторы — в staff, role = 'owner' | 'mod').
  * Сотрудник и продавец — независимые признаки: владелец может быть и продавцом (удобно для проверки с одного аккаунта).
  */
 
@@ -25,22 +26,36 @@ export interface StaffRow {
   tg_user_id: number;
   username: string | null;
   first_name: string | null;
+  role: 'owner' | 'mod';
   active: number;
   created_at: number;
 }
 
-export const isOwner = (env: Env, userId: number) => adminIds(env).includes(userId);
+/** Главный владелец — из ADMIN_IDS: только он отключает владельцев, добавленных по ссылке, и его самого не отключить */
+export const isMainOwner = (env: Env, userId: number) => adminIds(env).includes(userId);
 
+/** Владелец: главный или принявший ссылку /invite_admin — команды и права у них одинаковые */
+export async function isOwner(env: Env, userId: number): Promise<boolean> {
+  if (isMainOwner(env, userId)) return true;
+  const r = await env.DB.prepare(`SELECT 1 FROM staff WHERE tg_user_id = ? AND role = 'owner' AND active = 1`).bind(userId).first();
+  return !!r;
+}
+
+/** Любой активный сотрудник из staff — модератор или владелец по ссылке */
 export async function isMod(env: Env, userId: number): Promise<boolean> {
   const r = await env.DB.prepare('SELECT 1 FROM staff WHERE tg_user_id = ? AND active = 1').bind(userId).first();
   return !!r;
 }
 
-export async function isStaff(env: Env, userId: number): Promise<boolean> {
-  return isOwner(env, userId) || isMod(env, userId);
+export async function getStaff(env: Env, userId: number) {
+  return env.DB.prepare('SELECT * FROM staff WHERE tg_user_id = ?').bind(userId).first<StaffRow>();
 }
 
-/** Кому слать служебные сообщения: владельцы и активные модераторы */
+export async function isStaff(env: Env, userId: number): Promise<boolean> {
+  return isMainOwner(env, userId) || isMod(env, userId);
+}
+
+/** Кому слать служебные сообщения: владельцы и активные модераторы (владельцы по ссылке тоже в staff) */
 export async function staffIds(env: Env): Promise<number[]> {
   const { results } = await env.DB.prepare('SELECT tg_user_id FROM staff WHERE active = 1').all<{ tg_user_id: number }>();
   return [...new Set([...adminIds(env), ...results.map((r) => r.tg_user_id)])];
@@ -57,7 +72,7 @@ export async function touchSeller(env: Env, u: Person) {
     .run();
 }
 
-export type InviteRole = 'seller' | 'mod';
+export type InviteRole = 'seller' | 'mod' | 'owner';
 const INVITE_TTL = 86400;
 
 /** Код из 10 символов base64url — угадать перебором нереально */
@@ -84,7 +99,8 @@ export async function acceptInvite(env: Env, code: string, role: InviteRole, u: 
     if (!u.username) return { ok: false, reason: 'no_username' };
     const s = await getSeller(env, u.id);
     if (s?.status === 'active') return { ok: false, reason: 'already' };
-  } else if (await isMod(env, u.id)) {
+  } else if (role === 'mod' ? await isMod(env, u.id) : await isOwner(env, u.id)) {
+    // модератор по ссылке владельца становится владельцем; владельцу ссылка модератора не нужна
     return { ok: false, reason: 'already' };
   }
   const ts = now();
@@ -111,10 +127,11 @@ export async function acceptInvite(env: Env, code: string, role: InviteRole, u: 
   } else {
     await env.DB.prepare(
       `INSERT INTO staff (tg_user_id, role, username, first_name, added_by, active, created_at)
-       VALUES (?, 'mod', ?, ?, ?, 1, ?)
-       ON CONFLICT (tg_user_id) DO UPDATE SET active = 1, username = excluded.username, first_name = excluded.first_name`,
+       VALUES (?, ?, ?, ?, ?, 1, ?)
+       ON CONFLICT (tg_user_id) DO UPDATE SET role = excluded.role, active = 1, username = excluded.username,
+         first_name = excluded.first_name, added_by = excluded.added_by`,
     )
-      .bind(u.id, u.username ?? null, u.first_name ?? null, used.created_by, ts)
+      .bind(u.id, role, u.username ?? null, u.first_name ?? null, used.created_by, ts)
       .run();
   }
   return { ok: true, role };
@@ -126,7 +143,7 @@ export async function listSellers(env: Env) {
 }
 
 export async function listMods(env: Env) {
-  const { results } = await env.DB.prepare('SELECT * FROM staff ORDER BY active DESC, created_at DESC').all<StaffRow>();
+  const { results } = await env.DB.prepare(`SELECT * FROM staff ORDER BY active DESC, role = 'owner' DESC, created_at DESC`).all<StaffRow>();
   return results;
 }
 

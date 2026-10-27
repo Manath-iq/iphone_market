@@ -32,15 +32,16 @@ const STAFF: BotCommand[] = [
 const OWNER: BotCommand[] = [
   { command: 'invite', description: 'Ссылка для продавца' },
   { command: 'invite_mod', description: 'Ссылка для модератора' },
+  { command: 'invite_admin', description: 'Ссылка для владельца' },
   { command: 'sellers', description: 'Продавцы' },
-  { command: 'mods', description: 'Модераторы' },
+  { command: 'mods', description: 'Модераторы и владельцы' },
   { command: 'fee', description: 'Комиссия площадки' },
   { command: 'fee_mode', description: 'Комиссия к постам владельца' },
   { command: 'channel', description: 'Канал публикации' },
 ];
 
 export async function commandsFor(env: Env, userId: number): Promise<BotCommand[] | null> {
-  const owner = isOwner(env, userId);
+  const owner = await isOwner(env, userId);
   const [mod, seller] = await Promise.all([owner ? false : isMod(env, userId), getSeller(env, userId)]);
   const isSeller = seller?.status === 'active';
   if (!owner && !mod && !isSeller) return null;

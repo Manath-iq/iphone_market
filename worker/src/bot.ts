@@ -7,7 +7,7 @@ import type { ListingRow } from './db';
 import { addMedia, upsertPost } from './ingest';
 import { esc, notifySubscribers, sendAdminPreview, toStaff } from './notify';
 import { STORE } from './config';
-import { acceptInvite, isStaff, personLink, touchSeller, type InviteResult } from './roles';
+import { acceptInvite, isStaff, personLink, touchSeller, type InviteResult, type InviteRole } from './roles';
 import { syncCommands } from './commands';
 import { registerStaff } from './bot-staff';
 import { channelKey, postUrl } from './publish';
@@ -75,16 +75,19 @@ export function createBot({ env, origin, waitUntil }: Deps) {
 
   // ——— Покупатель ———
   h.command('start', async (ctx) => {
-    // приглашение: t.me/<бот>?start=s_<код> — продавец, m_<код> — модератор
-    const invite = ctx.match.match(/^([sm])_([\w-]{6,})$/);
+    // приглашение: t.me/<бот>?start=s_<код> — продавец, m_<код> — модератор, a_<код> — владелец
+    const invite = ctx.match.match(/^([sma])_([\w-]{6,})$/);
     if (invite && ctx.from) {
-      const role = invite[1] === 's' ? 'seller' : 'mod';
+      const role = ({ s: 'seller', m: 'mod', a: 'owner' } as const)[invite[1] as 's' | 'm' | 'a'];
       const res = await acceptInvite(env, invite[2], role, ctx.from);
       if (!res.ok) return ctx.reply(inviteReply(res, role), { parse_mode: 'HTML' });
-      // новому продавцу — сразу шаблон, модератору — что будет приходить; обоим с картинкой
+      // новому продавцу — сразу шаблон, модератору — что будет приходить; обоим с картинкой.
+      // Владельцу — без картинки: на картинке модератора написано «Вы модератор»
       if (role === 'seller') await sendWithCard(env, ctx.chat.id, 'seller', `${inviteReply(res, role)}\n\n${TEMPLATE_TEXT}`);
-      else await sendWithCard(env, ctx.chat.id, 'moderator', inviteReply(res, role));
-      waitUntil(toStaff(env, `👤 ${personLink(ctx.from)} ${role === 'seller' ? 'стал продавцом' : 'стал модератором'} по приглашению.`));
+      else if (role === 'mod') await sendWithCard(env, ctx.chat.id, 'moderator', inviteReply(res, role));
+      else await ctx.reply(inviteReply(res, role), { parse_mode: 'HTML' });
+      const became = { seller: 'стал продавцом', mod: 'стал модератором', owner: 'стал владельцем' }[role];
+      waitUntil(toStaff(env, `👤 ${personLink(ctx.from)} ${became} по приглашению.`));
       waitUntil(syncCommands(env, ctx.from.id));
       return;
     }
@@ -211,8 +214,17 @@ export function createBot({ env, origin, waitUntil }: Deps) {
   return bot;
 }
 
-function inviteReply(res: InviteResult, role: 'seller' | 'mod'): string {
+function inviteReply(res: InviteResult, role: InviteRole): string {
   if (res.ok) {
+    if (role === 'owner') {
+      return [
+        `Готово, вы владелец <b>${STORE.name}</b> ✅`,
+        '',
+        'У вас все команды владельца: каталог и статистика, продавцы и модераторы, комиссия и канал публикации. Сюда будут приходить заявки продавцов и превью новых постов канала.',
+        '',
+        'Все команды — /help',
+      ].join('\n');
+    }
     return role === 'seller'
       ? `Готово, вы продавец <b>${STORE.name}</b> ✅`
       : [
@@ -227,7 +239,11 @@ function inviteReply(res: InviteResult, role: 'seller' | 'mod'): string {
     case 'no_username':
       return 'Чтобы покупатели могли вам написать, задайте имя пользователя: Настройки → Имя пользователя. Потом откройте ссылку ещё раз — она по-прежнему действует.';
     case 'already':
-      return role === 'seller' ? 'Вы уже продавец — повторно ничего делать не нужно.' : 'Вы уже модератор.';
+      return role === 'seller'
+        ? 'Вы уже продавец — повторно ничего делать не нужно.'
+        : role === 'owner'
+          ? 'Вы уже владелец.'
+          : 'Вы уже в команде магазина — повторно ничего делать не нужно.';
     case 'used':
       return 'Эта ссылка уже использована. Попросите новую у владельца.';
     case 'expired':
