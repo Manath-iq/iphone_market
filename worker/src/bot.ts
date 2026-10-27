@@ -123,7 +123,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     if (shared) {
       const l = await env.DB.prepare('SELECT * FROM listings WHERE id = ?').bind(+shared[1]).first<ListingRow>();
       if (l?.status === 'active') {
-        await bot.api.sendMessage(chatId, `📱 <b>${esc(listingTitle(l))}</b>${l.price_rub ? ' — ' + formatPrice(l.price_rub) : ''}`, {
+        await bot.api.sendMessage(chatId, `${l.category === 'other' ? '📦' : '📱'} <b>${esc(listingTitle(l))}</b>${l.price_rub ? ' — ' + formatPrice(l.price_rub) : ''}`, {
           parse_mode: 'HTML',
           reply_markup: new InlineKeyboard().webApp('Открыть карточку', `${origin}/?l=${l.id}`).row().webApp('Весь каталог', origin),
         });
@@ -143,12 +143,12 @@ export function createBot({ env, origin, waitUntil }: Deps) {
       [
         `Здравствуйте! Это каталог <b>${STORE.name}</b> 🍏`,
         '',
-        n ? `Сейчас в наличии <b>${n}</b> ${plural(n, 'телефон', 'телефона', 'телефонов')} — только то, что можно купить прямо сейчас.` : 'Сейчас всё раскупили, но новые телефоны появляются почти каждый день.',
+        n ? `Сейчас в наличии <b>${n}</b> ${plural(n, 'товар', 'товара', 'товаров')} — только то, что можно купить прямо сейчас.` : 'Сейчас всё раскупили, но новые товары появляются почти каждый день.',
         '',
         '• фото, видео и честное описание каждого',
         '• фильтры по модели, памяти, цене и АКБ',
         '• «Купить» — оплачиваете услуги площадки и сразу получаете контакт продавца',
-        '• вопросы по телефону — менеджеру @Raxi_apple',
+        '• вопросы по лоту — менеджеру @Raxi_apple',
         '• подписка: напишу, когда появится нужная модель',
       ].join('\n'),
       new InlineKeyboard().webApp('📱 Открыть каталог', origin).row().webApp('🔔 Сообщить о поступлении', `${origin}/?tab=subs`),
@@ -184,8 +184,8 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     if (pay.status === 'paid') return ctx.answerCallbackQuery('Уже оплачено');
     // та же проверка, что pre_checkout_query при настоящей оплате
     if (!(await holdListing(env, pay.listing_id, ctx.from.id))) {
-      await ctx.answerCallbackQuery('Телефон уже забронирован или продан');
-      await ctx.editMessageText('Этот телефон уже забронирован или продан — оплата не нужна.').catch(() => {});
+      await ctx.answerCallbackQuery('Товар уже забронирован или продан');
+      await ctx.editMessageText('Этот товар уже забронирован или продан — оплата не нужна.').catch(() => {});
       return;
     }
     await ctx.answerCallbackQuery('Оплачено (тест)');
@@ -208,7 +208,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     if (!(await hasAcceptedTerms(env, ctx.from.id))) {
       return ctx.reply(termsText(origin), { parse_mode: 'HTML', reply_markup: termsKeyboard(origin), link_preview_options: { is_disabled: true } });
     }
-    await ctx.reply('Все телефоны в наличии — в каталоге 👇', { reply_markup: catalogKb() });
+    await ctx.reply('Всё, что в наличии, — в каталоге 👇', { reply_markup: catalogKb() });
   });
 
   return bot;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { Facets, Listing } from '../../../shared/types';
 import { formatPrice, formatStorage } from '../../../shared/parser';
-import { applyFilters, EMPTY, plural, sheetCount, SORT_LABELS, type Filters, type Sort } from '../filters';
+import { applyFilters, EMPTY, IPHONE_ONLY, OTHER, plural, sheetCount, SORT_LABELS, type Filters, type Sort } from '../filters';
 import { haptic } from '../tg';
 import { IconChevronDown, IconClose, IconFilter } from '../icons';
 import { Card, CardSkeleton } from './Card';
@@ -56,8 +56,13 @@ export function Catalog({ items, facets, filters, setFilters, storeName, error, 
 
   const pickFamily = (family: string | null) => {
     haptic.select();
-    setFilters({ ...filters, family });
+    setFilters({ ...filters, ...(family === OTHER ? IPHONE_ONLY : {}), family });
   };
+  const isOther = filters.family === OTHER;
+  // «Нет нужной модели?» и подписка — только про iPhone
+  const subFamily = isOther ? null : filters.family;
+  // пока в каталоге только iPhone, пишем «телефоны»
+  const noun = isOther || (!filters.family && (facets?.other_count ?? 0) > 0) ? (['товар', 'товара', 'товаров'] as const) : (['телефон', 'телефона', 'телефонов'] as const);
   const resetAll = () => {
     haptic.tap();
     setFilters({ ...EMPTY, sort: filters.sort });
@@ -99,12 +104,18 @@ export function Catalog({ items, facets, filters, setFilters, storeName, error, 
               <span class="chip-count">{f.count}</span>
             </button>
           ))}
+          {(facets?.other_count ?? 0) > 0 && (
+            <button role="tab" aria-selected={isOther} class={`chip ${isOther ? 'on' : ''}`} onClick={() => pickFamily(OTHER)}>
+              📦 Другое
+              <span class="chip-count">{facets!.other_count}</span>
+            </button>
+          )}
         </div>
       </header>
 
       <div class="toolbar">
         <div class="toolbar-count">
-          {shown ? `${shown.length} ${plural(shown.length, 'телефон', 'телефона', 'телефонов')}` : ' '}
+          {shown ? `${shown.length} ${plural(shown.length, noun[0], noun[1], noun[2])}` : ' '}
         </div>
         <label class="sort">
           {SORT_LABELS[filters.sort]}
@@ -156,7 +167,7 @@ export function Catalog({ items, facets, filters, setFilters, storeName, error, 
         <div class="empty">
           <Emoji name="party" size={72} class="empty-emoji" />
           <div class="empty-title">Всё раскупили</div>
-          <div class="empty-text">Новые телефоны появляются почти каждый день — подпишитесь, и бот напишет первым</div>
+          <div class="empty-text">Новые товары появляются почти каждый день — подпишитесь, и бот напишет первым</div>
           <button class="btn-primary" onClick={() => onSubscribe(null)}>
             Сообщить о поступлении
           </button>
@@ -167,8 +178,8 @@ export function Catalog({ items, facets, filters, setFilters, storeName, error, 
           <div class="empty-title">Под фильтры ничего нет</div>
           <div class="empty-text">Сбросьте фильтры или подпишитесь — пришлём, как только появится</div>
           <div class="empty-actions">
-            <button class="btn-primary" onClick={() => onSubscribe(filters.family)}>
-              {filters.family ? `Ждать iPhone ${filters.family}` : 'Подписаться на модель'}
+            <button class="btn-primary" onClick={() => onSubscribe(subFamily)}>
+              {subFamily ? `Ждать iPhone ${subFamily}` : 'Подписаться на модель'}
             </button>
             <button class="btn-secondary" onClick={resetAll}>
               Сбросить фильтры
@@ -183,8 +194,8 @@ export function Catalog({ items, facets, filters, setFilters, storeName, error, 
         </div>
       )}
 
-      {shown && shown.length > 0 && (
-        <button class="promo" onClick={() => (haptic.tap(), onSubscribe(filters.family))}>
+      {shown && shown.length > 0 && !isOther && (
+        <button class="promo" onClick={() => (haptic.tap(), onSubscribe(subFamily))}>
           <div class="promo-icon">
             <Emoji name="bell" size={30} />
           </div>

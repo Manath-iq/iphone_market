@@ -35,6 +35,9 @@ export interface MediaItem {
 export interface Listing {
   id: number;
   channel_msg_id: number;
+  /** other — товар не iPhone: название в model_raw, вместо характеристик — описание */
+  category: 'iphone' | 'other';
+  description: string | null;
   family: string | null;
   model_raw: string | null;
   storage_gb: number | null;
@@ -65,6 +68,8 @@ export interface Listing {
 
 export interface Facets {
   total: number;
+  /** сколько в наличии других товаров (не iPhone) */
+  other_count: number;
   families: { family: string; count: number }[];
   storages: number[];
   conditions: string[];

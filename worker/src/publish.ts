@@ -1,5 +1,5 @@
 import type { Message } from 'grammy/types';
-import { buildCaption, type CaptionFields } from '../../shared/caption';
+import { buildCaption, stripContactsMultiline, type CaptionFields } from '../../shared/caption';
 import type { Env } from './env';
 import { now } from './env';
 import type { ListingRow } from './db';
@@ -40,6 +40,8 @@ export function captionFields(l: ListingRow): CaptionFields {
     ios: l.ios,
     pluses: JSON.parse(l.pluses),
     nuances: JSON.parse(l.nuances),
+    category: l.category === 'other' ? 'other' : 'iphone',
+    description: l.description,
   };
 }
 
@@ -58,22 +60,24 @@ export async function publishSubmission(env: Env, sub: SubmissionRow, moderatorI
   const draft = await env.DB.prepare(
     `INSERT INTO listings (source_channel, channel_msg_id, media_group_id, category, model_raw, family, storage_gb,
        condition, sim, has_physical_sim, battery_pct, battery_cycles, ios, pluses, nuances, kit, full_kit, price_rub,
-       status, parse_ok, confirmed, raw_text, post_url, created_at, updated_at, seller_id, seller_price_rub, fee_rub, fee_in_post)
-     VALUES (?, ?, NULL, 'iphone', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'hidden', 1, 1, ?, '', ?, ?, ?, ?, ?, 0)
+       status, parse_ok, confirmed, raw_text, post_url, created_at, updated_at, seller_id, seller_price_rub, fee_rub, fee_in_post, description)
+     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'hidden', 1, 1, ?, '', ?, ?, ?, ?, ?, 0, ?)
      RETURNING *`,
   )
     .bind(
-      `pending:${publish_chat_id}`, -sub.id, p.model_raw, p.family, p.storage_gb, p.condition, p.sim,
+      `pending:${publish_chat_id}`, -sub.id, sub.category, p.model_raw, p.family, p.storage_gb, p.condition, p.sim,
       p.has_physical_sim === null ? null : +p.has_physical_sim, p.battery_pct, p.battery_cycles, p.ios,
       JSON.stringify(p.pluses), JSON.stringify(p.nuances), p.kit, +p.full_kit, price,
-      sub.raw_text ?? '', ts, ts, sub.seller_id, sub.seller_price_rub, fee_rub,
+      sub.raw_text ?? sub.description ?? '', ts, ts, sub.seller_id, sub.seller_price_rub, fee_rub,
+      // в карточку — описание уже без контактов: API отдаёт его покупателю
+      sub.category === 'other' ? stripContactsMultiline(sub.description ?? '') : null,
     )
     .first<ListingRow>();
   if (!draft) throw new Error('listing insert failed');
 
   let msgs: Message[];
   try {
-    const caption = buildCaption(p, { price, lot: draft.id, buyUrl: appLink(env, draft.id) });
+    const caption = buildCaption(captionFields(draft), { price, lot: draft.id, buyUrl: appLink(env, draft.id) });
     msgs = await sendAlbum(env, publish_chat_id, await getSubmissionMedia(env, sub.id), caption);
   } catch (e) {
     await env.DB.prepare('DELETE FROM listings WHERE id = ?').bind(draft.id).run();

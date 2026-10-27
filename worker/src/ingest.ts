@@ -50,6 +50,7 @@ export async function upsertPost(env: Env, post: IncomingPost): Promise<UpsertRe
     const { fee_rub, owner_fee_mode } = await getSettings(env);
     const inPost = owner_fee_mode === 'incl';
     const prices = ownerPrices(p.price_rub, fee_rub, inPost);
+    // посты канала — всегда iPhone: другие товары выставляют только через бота
     const row = await env.DB.prepare(
       `INSERT INTO listings (source_channel, channel_msg_id, media_group_id, category, model_raw, family, storage_gb,
         condition, sim, has_physical_sim, battery_pct, battery_cycles, ios, pluses, nuances, kit, full_kit, price_rub,
@@ -59,7 +60,7 @@ export async function upsertPost(env: Env, post: IncomingPost): Promise<UpsertRe
        RETURNING *`,
     )
       .bind(
-        post.channel, post.msg_id, post.media_group_id, p.category, p.model_raw, p.family, p.storage_gb,
+        post.channel, post.msg_id, post.media_group_id, 'iphone', p.model_raw, p.family, p.storage_gb,
         p.condition, p.sim, p.has_physical_sim === null ? null : +p.has_physical_sim, p.battery_pct, p.battery_cycles,
         p.ios, JSON.stringify(p.pluses), JSON.stringify(p.nuances), p.kit, +p.full_kit, prices.price,
         p.status, +p.parse_ok, post.text, post.post_url, post.date || ts, ts, prices.seller, fee_rub, +inPost,

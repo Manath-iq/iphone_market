@@ -2,7 +2,7 @@ import { render, type ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Listing, MediaItem } from '../../../shared/types';
 import { formatPrice, formatStorage } from '../../../shared/parser';
-import { batteryTone, isNew } from '../filters';
+import { batteryTone, isNew, listingName } from '../filters';
 import { api } from '../api';
 import { haptic, inTelegram, tg, openTgLink, openInvoice, pushBack, copyText, requestWriteAccess } from '../tg';
 import { IconCheck, IconChevron, IconClose, IconInfo, IconLock, IconPaper, IconPlay, IconQuestion, IconShare } from '../icons';
@@ -99,7 +99,7 @@ export function Detail({ id, preview, botUsername, onClose, onReserved, toast }:
     if (!l) return;
     haptic.tap();
     const link = `https://t.me/${botUsername}?start=l_${l.id}`;
-    const text = `iPhone ${l.family}${l.storage_gb ? ' ' + formatStorage(l.storage_gb) : ''}${l.price_rub ? ' — ' + formatPrice(l.price_rub) : ''}`;
+    const text = `${listingName(l)}${l.storage_gb ? ' ' + formatStorage(l.storage_gb) : ''}${l.price_rub ? ' — ' + formatPrice(l.price_rub) : ''}`;
     if (inTelegram) openTgLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`);
     else if (await copyText(link)) toast('Ссылка скопирована');
   };
@@ -110,6 +110,9 @@ export function Detail({ id, preview, botUsername, onClose, onReserved, toast }:
   const hasVideo = media.some((m) => m.kind === 'video');
   // «Полный комплект» уже есть в плитке «Комплект» — в плюсах не повторяем
   const pluses = l ? l.pluses.filter((p) => !(l.full_kit && /^полный комплект$/i.test(p))) : [];
+  // версия iOS — строкой в плюсах, а не отдельной плиткой
+  if (l?.ios && !pluses.some((p) => /\bios\b/i.test(p))) pluses.unshift(`iOS ${l.ios}`);
+  const other = l?.category === 'other';
 
   return (
     <div class="screen detail">
@@ -124,7 +127,7 @@ export function Detail({ id, preview, botUsername, onClose, onReserved, toast }:
       {missing && !l ? (
         <div class="empty">
           <Emoji name="shrug" size={80} class="empty-emoji" />
-          <div class="empty-title">Этот телефон уже продан</div>
+          <div class="empty-title">Этот лот уже продан</div>
           <div class="empty-text">Загляните в каталог — там есть похожие</div>
           <button class="btn-primary" onClick={onClose}>
             Смотреть другие
@@ -150,7 +153,7 @@ export function Detail({ id, preview, botUsername, onClose, onReserved, toast }:
               <span class="lot-no">Лот №{l.id}</span>
             </div>
             <h1>
-              iPhone {l.family ?? l.model_raw}
+              {listingName(l)}
               {l.storage_gb ? <span class="muted"> {formatStorage(l.storage_gb)}</span> : null}
             </h1>
             <div class="detail-price">
@@ -159,20 +162,28 @@ export function Detail({ id, preview, botUsername, onClose, onReserved, toast }:
             </div>
           </div>
 
-          <div class="specs">
-            <Spec label="Состояние" value={l.condition} />
-            <Spec
-              label="Аккумулятор"
-              value={l.battery_pct !== null ? `${l.battery_pct}%` : null}
-              hint={l.battery_cycles ? `${l.battery_cycles} циклов` : undefined}
-              tone={batteryTone(l.battery_pct)}
-              meter={l.battery_pct}
-            />
-            <Spec label="SIM" value={l.sim} />
-            <Spec label="Память" value={l.storage_gb ? formatStorage(l.storage_gb) : null} />
-            {l.ios && <Spec label="iOS" value={l.ios} />}
-            <Spec label="Комплект" value={l.kit ?? (l.full_kit ? 'Полный' : null)} />
-          </div>
+          {other ? (
+            l.description && (
+              <section class="group">
+                <h3>Описание</h3>
+                <p class="desc">{l.description}</p>
+              </section>
+            )
+          ) : (
+            <div class="specs">
+              <Spec label="Состояние" value={l.condition} />
+              <Spec
+                label="Аккумулятор"
+                value={l.battery_pct !== null ? `${l.battery_pct}%` : null}
+                hint={l.battery_cycles ? `${l.battery_cycles} циклов` : undefined}
+                tone={batteryTone(l.battery_pct)}
+                meter={l.battery_pct}
+              />
+              <Spec label="SIM" value={l.sim} />
+              <Spec label="Память" value={l.storage_gb ? formatStorage(l.storage_gb) : null} />
+              <Spec label="Комплект" value={l.kit ?? (l.full_kit ? 'Полный' : null)} />
+            </div>
+          )}
 
           {pluses.length > 0 && (
             <section class="group">

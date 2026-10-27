@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Facets, Listing } from '../../shared/types';
 import { api, type StoreInfo } from './api';
-import { EMPTY, type Filters } from './filters';
+import { EMPTY, OTHER, type Filters } from './filters';
 import { haptic, inTelegram, popBack, startParam, tg } from './tg';
 import { Catalog } from './components/Catalog';
 import { FilterSheet } from './components/FilterSheet';
@@ -89,7 +89,9 @@ export function App() {
 
   // если выбранной модели больше нет в наличии — сбросить чип
   useEffect(() => {
-    if (facets && filters.family && !facets.families.some((f) => f.family === filters.family)) setFilters({ ...filters, family: null });
+    if (!facets || !filters.family) return;
+    const has = filters.family === OTHER ? facets.other_count > 0 : facets.families.some((f) => f.family === filters.family);
+    if (!has) setFilters({ ...filters, family: null });
   }, [facets]);
 
   const goTab = (t: Tab) => {

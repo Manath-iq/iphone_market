@@ -15,7 +15,8 @@ const START: BotCommand[] = [
 ];
 
 const SELLER: BotCommand[] = [
-  { command: 'template', description: 'Шаблон объявления' },
+  { command: 'new', description: 'Выставить товар' },
+  { command: 'template', description: 'Шаблон для iPhone' },
   { command: 'my', description: 'Мои товары' },
 ];
 

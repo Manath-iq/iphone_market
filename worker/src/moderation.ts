@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import { CAPTION_LIMIT, stripContacts } from '../../shared/caption';
+import { CAPTION_LIMIT, stripContacts, stripContactsMultiline } from '../../shared/caption';
 import { formatPrice, listingTitle } from '../../shared/parser';
 import type { Env } from './env';
 import { api, esc } from './notify';
@@ -25,11 +25,12 @@ export async function modCardText(env: Env, sub: SubmissionRow, footer?: string)
   const seller = await getSeller(env, sub.seller_id);
   const { fee_rub } = await getSettings(env);
   const sellerPrice = sub.seller_price_rub ?? 0;
+  const other = sub.category === 'other';
   const head = [
-    `🆕 <b>Заявка №${sub.id}</b>`,
+    `🆕 <b>Заявка №${sub.id}</b>${other ? ' · другой товар' : ''}`,
     '',
-    `<b>${esc(p ? listingTitle(p) : 'Телефон')}</b>`,
-    [p?.condition, p?.battery_pct && `АКБ ${p.battery_pct}%`, p?.sim].filter(Boolean).map((s) => esc(String(s))).join(' · '),
+    `<b>${esc(p ? listingTitle(p) : 'Товар')}</b>`,
+    other ? '' : [p?.condition, p?.battery_pct && `АКБ ${p.battery_pct}%`, p?.sim].filter(Boolean).map((s) => esc(String(s))).join(' · '),
   ];
   const tail = [
     '',
@@ -40,11 +41,10 @@ export async function modCardText(env: Env, sub: SubmissionRow, footer?: string)
     `Продавец: ${personLink({ id: sub.seller_id, username: seller?.username, first_name: seller?.first_name })} · <code>${sub.seller_id}</code>`,
     ...(footer ? ['', footer] : []),
   ];
-  // плюсы и нюансы — уже без контактов, как в посте; лишнее отрезаем с конца
-  const items = [
-    ...(p?.pluses ?? []).map((x) => `✅ ${esc(stripContacts(x))}`),
-    ...(p?.nuances ?? []).map((x) => `✖️ ${esc(stripContacts(x))}`),
-  ];
+  // плюсы и нюансы (у другого товара — строки описания) — уже без контактов, как в посте; лишнее отрезаем с конца
+  const items = other
+    ? stripContactsMultiline(sub.description ?? '').split('\n').map(esc)
+    : [...(p?.pluses ?? []).map((x) => `✅ ${esc(stripContacts(x))}`), ...(p?.nuances ?? []).map((x) => `✖️ ${esc(stripContacts(x))}`)];
   const plainLen = (lines: string[]) => lines.join('\n').replace(/<[^>]+>/g, '').length;
   while (items.length && plainLen([...head, ...items, ...tail]) > CAPTION_LIMIT) items.pop();
   return [...head, ...items, ...tail].filter((s, i, a) => s !== '' || a[i - 1] !== '').join('\n');

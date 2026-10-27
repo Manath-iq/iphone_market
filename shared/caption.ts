@@ -10,7 +10,11 @@ export const CAPTION_LIMIT = 1024;
 export type CaptionFields = Pick<
   ParsedPost,
   'family' | 'model_raw' | 'storage_gb' | 'condition' | 'sim' | 'battery_pct' | 'battery_cycles' | 'ios' | 'pluses' | 'nuances'
->;
+> & {
+  /** other — товар не iPhone: название в model_raw, вместо характеристик — описание продавца */
+  category?: ParsedPost['category'];
+  description?: string | null;
+};
 
 export interface CaptionOptions {
   /** итоговая цена для покупателя (цена продавца + комиссия) */
@@ -46,6 +50,27 @@ export function stripContacts(text: string): string {
     .trim();
 }
 
+/**
+ * То же для описания другого товара: чистим каждую строку отдельно, переносы и отступы продавца сохраняем.
+ * Строка, в которой были только контакты, пропадает; подряд идущие пустые строки схлопываются в одну.
+ */
+export function stripContactsMultiline(text: string): string {
+  const lines: string[] = [];
+  for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
+    let s = line;
+    for (const re of CONTACT_PATTERNS) s = s.replace(re, '');
+    if (s !== line) {
+      s = s.replace(/(\S) {2,}/g, '$1 ').replace(/[\s,;:—–-]+$/, '');
+      if (!s.trim()) continue;
+    }
+    s = s.trimEnd();
+    if (!s && (!lines.length || lines[lines.length - 1] === '')) continue;
+    lines.push(s);
+  }
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines.join('\n');
+}
+
 const plain = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 /**
@@ -54,11 +79,11 @@ const plain = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<
  * Текст — HTML (parse_mode: 'HTML'). Если не влезает в лимит Telegram, сначала убираем плюсы, потом нюансы с конца.
  */
 export function buildCaption(f: CaptionFields, o: CaptionOptions): string {
+  if (f.category === 'other') return otherCaption(f, o);
   const pluses = f.pluses.map(stripContacts).filter(Boolean);
   const nuances = f.nuances.map(stripContacts).filter(Boolean);
   const render = () => {
-    const tag = o.closed === 'sold' ? '❌ Продано ❌' : o.closed === 'withdrawn' ? '⛔️ Снято с продажи' : ACTIVE_TAG;
-    const lines = [`📱 ${esc(listingTitle(f))}`, tag];
+    const lines = [`📱 ${esc(listingTitle(f))}`, tagLine(o)];
     if (o.lot) lines.push(`ЛОТ №${o.lot}`);
     lines.push('');
     const condition = f.condition && stripContacts(f.condition);
@@ -81,6 +106,37 @@ export function buildCaption(f: CaptionFields, o: CaptionOptions): string {
     html = render();
   }
   return html;
+}
+
+const tagLine = (o: CaptionOptions) => (o.closed === 'sold' ? '❌ Продано ❌' : o.closed === 'withdrawn' ? '⛔️ Снято с продажи' : ACTIVE_TAG);
+
+/** Пост другого товара: название, описание продавца как есть (без контактов), цена */
+function otherCaption(f: CaptionFields, o: CaptionOptions, cut = 0): string {
+  let description = stripContactsMultiline(f.description ?? '');
+  if (cut) description = description.slice(0, Math.max(0, description.length - cut - 1)).trimEnd() + '…';
+  const lines = [`📦 ${esc(stripContacts(f.model_raw ?? '') || 'Товар')}`, tagLine(o)];
+  if (o.lot) lines.push(`ЛОТ №${o.lot}`);
+  if (description) lines.push('', esc(description));
+  lines.push('', `💰 ${formatPrice(o.price)}`, '');
+  const buy = `Купить лот №${o.lot ?? '…'}`;
+  if (!o.closed) lines.push(o.lot && o.buyUrl ? `🛒 <a href="${esc(o.buyUrl)}">${buy}</a>` : `🛒 ${buy}`);
+  lines.push(`❓ Вопрос по лоту — @${MANAGER_USERNAME}`);
+  const html = lines.join('\n');
+  // описание проверяем при подаче (descriptionOverflow); обрезка — только страховка
+  const over = plain(html).length - CAPTION_LIMIT;
+  return over > 0 && description && !cut ? otherCaption(f, o, over) : html;
+}
+
+/**
+ * На сколько символов описание не влезает в подпись поста (0 — влезает). Считаем с самым длинным
+ * номером лота и строкой «Купить», чтобы пост влез и после публикации.
+ */
+export function descriptionOverflow(title: string, description: string, price: number): number {
+  const lines = [
+    `📦 ${stripContacts(title)}`, ACTIVE_TAG, 'ЛОТ №9999999', '', stripContactsMultiline(description), '',
+    `💰 ${formatPrice(price)}`, '', '🛒 Купить лот №9999999', `❓ Вопрос по лоту — @${MANAGER_USERNAME}`,
+  ];
+  return Math.max(0, lines.join('\n').length - CAPTION_LIMIT);
 }
 
 /** Шаблон подписи, который бот присылает продавцу */

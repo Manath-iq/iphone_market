@@ -8,7 +8,7 @@ const row: ListingRow = {
   has_physical_sim: 1, battery_pct: 91, battery_cycles: 300, ios: '18.1', pluses: '[]', nuances: '[]', kit: null,
   full_kit: 0, price_rub: 80000, status: 'active', parse_ok: 1, confirmed: 1, raw_text: 'текст продавца @seller_nick',
   post_url: 'https://t.me/apple_raxi/100', created_at: 1, updated_at: 1, sold_at: null,
-  seller_id: 123456789, seller_price_rub: 79000, fee_rub: 1000, fee_in_post: 0, reserved_until: null, reserved_by: 42, reserve_paid: 1, reserve_notified: 0,
+  seller_id: 123456789, seller_price_rub: 79000, fee_rub: 1000, fee_in_post: 0, reserved_until: null, reserved_by: 42, reserve_paid: 1, reserve_notified: 0, description: null,
 };
 
 describe('toListing', () => {

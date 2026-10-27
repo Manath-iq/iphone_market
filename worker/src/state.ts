@@ -2,10 +2,21 @@ import type { Env } from './env';
 import { now } from './env';
 
 /**
- * Чего бот ждёт от человека следующим сообщением: подпись к заявке, причину отказа, новую цену.
+ * Чего бот ждёт от человека следующим сообщением: подпись к заявке, причину отказа, новую цену,
+ * шаги мастера «другой товар» (название, цена продавца, фото, описание).
  * Одна строка на человека: новое ожидание заменяет старое.
  */
-export type StateKind = 'await_caption' | 'await_reason' | 'await_price';
+export type StateKind =
+  | 'await_caption'
+  | 'await_reason'
+  | 'await_price'
+  | 'await_title'
+  | 'await_seller_price'
+  | 'await_media'
+  | 'await_desc';
+
+/** Шаги мастера «другой товар»: ref_id — заявка */
+export const WIZARD_STATES: StateKind[] = ['await_title', 'await_seller_price', 'await_media', 'await_desc'];
 
 export interface BotState {
   kind: StateKind;

@@ -1613,3 +1613,16 @@ video {
   font-size: 15px;
   line-height: 1.45;
 }
+
+/* описание другого товара — как написал продавец: переносы и отступы сохраняются */
+.desc {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 0 0 0.5px var(--sep);
+  font-size: 15px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

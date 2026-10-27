@@ -2,6 +2,15 @@ import type { Listing } from '../../shared/types';
 
 export type Sort = 'new' | 'cheap' | 'expensive' | 'battery';
 
+/** Значение чипа «Другое» в фильтре модели: все товары, кроме iPhone */
+export const OTHER = '__other__';
+
+/** Заголовок карточки: у другого товара — название продавца, у iPhone — модель */
+export const listingName = (l: Listing) => (l.category === 'other' ? l.model_raw ?? 'Товар' : `iPhone ${l.family ?? l.model_raw}`);
+
+/** Фильтры листа, которые есть только у iPhone: в «Другом» их нет */
+export const IPHONE_ONLY: Partial<Filters> = { storages: [], batteryMin: null, conditions: [], sim: 'any' };
+
 export interface Filters {
   family: string | null;
   storages: number[];
@@ -42,7 +51,7 @@ export const sheetCount = (f: Filters) =>
 export function applyFilters(items: Listing[], f: Filters, ignoreFamily = false): Listing[] {
   const out = items.filter(
     (l) =>
-      (ignoreFamily || !f.family || l.family === f.family) &&
+      (ignoreFamily || !f.family || (f.family === OTHER ? l.category === 'other' : l.family === f.family)) &&
       (!f.storages.length || (l.storage_gb !== null && f.storages.includes(l.storage_gb))) &&
       (f.priceMin === null || (l.price_rub ?? 0) >= f.priceMin) &&
       (f.priceMax === null || (l.price_rub ?? 0) <= f.priceMax) &&

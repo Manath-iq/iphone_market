@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Facets, Listing } from '../../../shared/types';
 import { formatPrice, formatStorage } from '../../../shared/parser';
-import { applyFilters, EMPTY, sheetCount, type Filters } from '../filters';
+import { applyFilters, EMPTY, OTHER, sheetCount, type Filters } from '../filters';
 import { haptic } from '../tg';
 import { IconClose } from '../icons';
 
@@ -18,6 +18,7 @@ const toggle = <T,>(arr: T[], v: T) => (arr.includes(v) ? arr.filter((x) => x !=
 const STEP = 1000;
 
 export function FilterSheet({ open, items, facets, filters, onApply, onClose }: Props) {
+  const other = filters.family === OTHER;
   const [f, setF] = useState(filters);
   const [drag, setDrag] = useState(0);
   const startY = useRef<number | null>(null);
@@ -63,6 +64,9 @@ export function FilterSheet({ open, items, facets, filters, onApply, onClose }: 
         </div>
 
         <div class="sheet-scroll">
+          {/* у других товаров (не iPhone) — только цена */}
+          {!other && (
+            <>
           <section class="fs">
             <h3>Память</h3>
             <div class="chips wrap">
@@ -73,6 +77,9 @@ export function FilterSheet({ open, items, facets, filters, onApply, onClose }: 
               ))}
             </div>
           </section>
+
+            </>
+          )}
 
           <section class="fs">
             <h3>
@@ -97,6 +104,8 @@ export function FilterSheet({ open, items, facets, filters, onApply, onClose }: 
             </div>
           </section>
 
+          {!other && (
+            <>
           <section class="fs">
             <h3>АКБ от</h3>
             <div class="segmented">
@@ -135,6 +144,8 @@ export function FilterSheet({ open, items, facets, filters, onApply, onClose }: 
               ))}
             </div>
           </section>
+            </>
+          )}
         </div>
 
         <div class="sheet-foot">

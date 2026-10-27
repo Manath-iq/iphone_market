@@ -132,7 +132,7 @@ export async function statsText(env: Env, days = 7): Promise<string> {
   const by = Object.fromEntries(results.map((r) => [r.type, r]));
   const top = await env.DB.prepare(
     `SELECT l.family, l.storage_gb, COUNT(*) AS c FROM events e JOIN listings l ON l.id = e.listing_id
-     WHERE e.type = 'card_view' AND e.created_at >= ? GROUP BY l.family ORDER BY c DESC LIMIT 3`,
+     WHERE e.type = 'card_view' AND e.created_at >= ? AND l.family IS NOT NULL GROUP BY l.family ORDER BY c DESC LIMIT 3`,
   )
     .bind(since)
     .all<{ family: string; c: number }>();

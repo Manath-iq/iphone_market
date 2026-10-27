@@ -19,6 +19,10 @@ export interface SubmissionRow {
   listing_id: number | null;
   created_at: number;
   updated_at: number;
+  /** iphone — подпись по шаблону, other — мастер: название, цена, фото, описание */
+  category: 'iphone' | 'other';
+  title: string | null;
+  description: string | null;
 }
 
 export interface SubmissionMedia {
@@ -60,13 +64,78 @@ export async function addPart(env: Env, sellerId: number, groupKey: string, part
     .bind(sellerId, groupKey, caption, Date.now(), ts, ts)
     .first<{ id: number; status: SubmissionStatus }>();
   if (!sub) throw new Error('submission upsert failed');
-  await env.DB.prepare(
+  await insertMedia(env, sub.id, part);
+  return sub;
+}
+
+const insertMedia = (env: Env, subId: number, part: IncomingPart) =>
+  env.DB.prepare(
     `INSERT OR IGNORE INTO submission_media (submission_id, msg_id, kind, file_id, file_size, width, height)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(sub.id, part.msg_id, part.kind, part.file_id, part.file_size ?? null, part.width ?? null, part.height ?? null)
+    .bind(subId, part.msg_id, part.kind, part.file_id, part.file_size ?? null, part.width ?? null, part.height ?? null)
     .run();
+
+/** Ключ заявки мастера, пока к ней не пришли фото: уникален и не совпадает ни с одним альбомом */
+const wizardKey = () => `w${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+/**
+ * Новая заявка «другой товар». Брошенные незаконченные заявки мастера этого продавца отменяем,
+ * чтобы в /my и в ответах бота не путались старые черновики.
+ */
+export async function createWizard(env: Env, sellerId: number) {
+  const ts = now();
+  await env.DB.prepare(
+    `UPDATE submissions SET status = 'cancelled', updated_at = ?
+     WHERE seller_id = ? AND status = 'draft' AND category = 'other' AND parsed IS NULL`,
+  )
+    .bind(ts, sellerId)
+    .run();
+  const sub = await env.DB.prepare(
+    `INSERT INTO submissions (seller_id, group_key, status, category, last_part_at, created_at, updated_at)
+     VALUES (?, ?, 'draft', 'other', 0, ?, ?) RETURNING *`,
+  )
+    .bind(sellerId, wizardKey(), ts, ts)
+    .first<SubmissionRow>();
+  if (!sub) throw new Error('wizard insert failed');
   return sub;
+}
+
+/**
+ * Фото к заявке мастера. Первая часть отдаёт заявке ключ альбома: части, пришедшие уже после того,
+ * как бот перестал ждать фото, найдут ту же заявку через addPart, а не создадут новую.
+ * Подпись к альбому считаем описанием, если его ещё нет.
+ */
+export async function addPartTo(env: Env, subId: number, groupKey: string, part: IncomingPart, caption: string | null) {
+  await env.DB.prepare(
+    `UPDATE submissions SET
+       group_key = CASE WHEN group_key LIKE 'w%' AND NOT EXISTS (
+         SELECT 1 FROM submissions o WHERE o.seller_id = submissions.seller_id AND o.group_key = ?) THEN ? ELSE group_key END,
+       description = COALESCE(description, ?), last_part_at = ?, preview_sent = 0, parsed = NULL, updated_at = ?
+     WHERE id = ? AND status = 'draft'`,
+  )
+    .bind(groupKey, groupKey, caption, Date.now(), now(), subId)
+    .run();
+  await insertMedia(env, subId, part);
+}
+
+/** Поля заявки мастера. Сбрасываем разбор и превью: отправить на проверку можно только после нового превью */
+export async function setWizardFields(env: Env, id: number, f: { title?: string; seller_price_rub?: number; description?: string | null }) {
+  const sets = Object.keys(f).map((k) => `${k} = ?`);
+  await env.DB.prepare(
+    `UPDATE submissions SET ${sets.join(', ')}, parsed = NULL, preview_sent = 0, last_part_at = 0, updated_at = ?
+     WHERE id = ? AND status = 'draft'`,
+  )
+    .bind(...Object.values(f), now(), id)
+    .run();
+}
+
+/** «Исправить фото»: старые убираем, новый альбом ляжет на их место */
+export async function clearMedia(env: Env, id: number) {
+  await env.DB.prepare('DELETE FROM submission_media WHERE submission_id = ?').bind(id).run();
+  await env.DB.prepare(`UPDATE submissions SET group_key = ?, parsed = NULL, updated_at = ? WHERE id = ? AND status = 'draft'`)
+    .bind(wizardKey(), now(), id)
+    .run();
 }
 
 /**
@@ -119,7 +188,7 @@ export async function getSubmissionMedia(env: Env, id: number) {
 /** Свежий черновик без подписи: продавцы часто шлют альбом, а описание — следующим сообщением */
 export async function recentDraftWithoutText(env: Env, sellerId: number) {
   return env.DB.prepare(
-    `SELECT * FROM submissions WHERE seller_id = ? AND status = 'draft' AND (raw_text IS NULL OR raw_text = '')
+    `SELECT * FROM submissions WHERE seller_id = ? AND status = 'draft' AND category = 'iphone' AND (raw_text IS NULL OR raw_text = '')
        AND last_part_at > ? ORDER BY id DESC LIMIT 1`,
   )
     .bind(sellerId, Date.now() - 10 * 60 * 1000)

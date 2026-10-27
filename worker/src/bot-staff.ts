@@ -147,13 +147,13 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
 
   async function publishAndReport(sub: SubmissionRow, mod: { id: number; username?: string; first_name?: string }) {
     const p = parsedOf(sub);
-    const title = esc(p ? listingTitle(p) : 'Телефон');
+    const title = esc(p ? listingTitle(p) : 'Товар');
     try {
       const l = await publishSubmission(env, sub, mod.id);
       await refreshModCards(env, sub.id, `✅ Опубликовал ${personLink(mod)} · <a href="${l.post_url}">лот №${l.id}</a>`);
       await api(env).sendMessage(
         sub.seller_id,
-        `✅ Ваш ${title} опубликован — <b>лот №${l.id}</b>.\nЦена для покупателя: ${formatPrice(l.price_rub ?? 0)}.\n\nКогда продадите, отметьте это в /my.`,
+        `✅ Опубликовано: ${title} — <b>лот №${l.id}</b>.\nЦена для покупателя: ${formatPrice(l.price_rub ?? 0)}.\n\nКогда продадите, отметьте это в /my.`,
         { parse_mode: 'HTML' },
       );
       await notifySubscribers(env, origin, l);
@@ -180,7 +180,7 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
 
     if (st.kind === 'await_price') {
       const price = parseInt(text.replace(/\D/g, ''), 10);
-      if (!price || price < 1000 || price > 1_000_000) return ctx.reply('Не понял цену. Пришлите число в рублях, например 75000.');
+      if (!price || price < 100 || price > 10_000_000) return ctx.reply('Не понял цену. Пришлите число в рублях, например 75000.');
       await clearState(env, ctx.from.id);
       const sub = await getSubmission(env, id);
       const p = sub && parsedOf(sub);
@@ -210,7 +210,7 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
     await api(env)
       .sendMessage(
         sub.seller_id,
-        `❌ Заявка на ${esc(p ? listingTitle(p) : 'телефон')} отклонена.\n\nПричина: ${esc(reason)}\n\nМожно исправить и прислать альбом заново.`,
+        `❌ Заявка на ${esc(p ? listingTitle(p) : 'товар')} отклонена.\n\nПричина: ${esc(reason)}\n\nМожно исправить и выставить заново — /new`,
         { parse_mode: 'HTML' },
       )
       .catch((e) => console.warn('seller notify failed', String(e)));

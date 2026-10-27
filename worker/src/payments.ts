@@ -14,7 +14,7 @@ import { sendWithCard } from './cards';
  * Оплата комиссии площадки и бронь.
  * - Есть секрет PAYMENT_PROVIDER_TOKEN — счёт Telegram Payments (ЮKassa) открывается прямо в мини-аппе.
  * - Нет секрета — тестовый режим: бот присылает кнопку «Оплатить (тест)», сценарий проходит целиком без денег.
- * На время оплаты телефон удерживается 10 минут, после оплаты — бронь на reserve_hours. Покупатель получает только ник продавца.
+ * На время оплаты товар удерживается 10 минут, после оплаты — бронь на reserve_hours. Покупатель получает только ник продавца.
  */
 
 export interface PaymentRow {
@@ -89,7 +89,7 @@ export async function createCheckout(env: Env, listingId: number, buyer: Person)
         `Услуги площадки: <b>${formatPrice(l.fee_rub)}</b>`,
         `Остаток ${rest} — продавцу напрямую.`,
         '',
-        'После оплаты пришлём контакт продавца, а телефон забронируем за вами.',
+        'После оплаты пришлём контакт продавца, а товар забронируем за вами.',
       ].join('\n'),
       { parse_mode: 'HTML', reply_markup: new InlineKeyboard().text(`Оплатить ${formatPrice(l.fee_rub)} (тест)`, `tpay:${pay!.id}`) },
     );
@@ -126,7 +126,7 @@ export async function getPayment(env: Env, id: number) {
 }
 
 /**
- * Удержать телефон за покупателем на время оплаты. Один атомарный UPDATE: если двое платят одновременно,
+ * Удержать товар за покупателем на время оплаты. Один атомарный UPDATE: если двое платят одновременно,
  * удержание получит один, второму Telegram откажет в оплате ещё до списания денег.
  */
 export async function holdListing(env: Env, listingId: number, buyerId: number) {
@@ -147,7 +147,7 @@ export async function preCheckout(env: Env, payload: string, buyerId: number, to
   if (!pay || pay.buyer_id !== buyerId || pay.status !== 'pending') return 'Счёт устарел. Откройте карточку и нажмите «Купить» ещё раз.';
   if (pay.amount_rub * 100 !== totalAmount) return 'Сумма изменилась. Откройте карточку и нажмите «Купить» ещё раз.';
   const held = await holdListing(env, pay.listing_id, buyerId);
-  return held ? null : 'Этот телефон уже забронирован или продан — деньги не списаны.';
+  return held ? null : 'Этот товар уже забронирован или продан — деньги не списаны.';
 }
 
 /**
@@ -197,14 +197,14 @@ export async function completePayment(env: Env, paymentId: number, chargeId: str
         'Напишите ему, чтобы договориться о встрече и оплате.',
         '',
         `Остаток <b>${rest}</b> оплачивается продавцу напрямую.`,
-        `Телефон забронирован за вами до ${untilText} (МСК).`,
+        `Товар забронирован за вами до ${untilText} (МСК).`,
       ].join('\n'),
       new InlineKeyboard().url('Написать продавцу', `https://t.me/${sellerNick}`),
     );
   } else {
     // у продавца пропал @username — контакт передаст менеджер
     await toBuyer(
-      `✅ Оплата прошла. Лот №${l.id} · ${title}\n\nКонтакт продавца пришлёт менеджер @Raxi_apple в ближайшее время. Телефон забронирован за вами до ${untilText} (МСК).`,
+      `✅ Оплата прошла. Лот №${l.id} · ${title}\n\nКонтакт продавца пришлёт менеджер @Raxi_apple в ближайшее время. Товар забронирован за вами до ${untilText} (МСК).`,
     );
   }
   if (l.seller_id) {
@@ -250,7 +250,7 @@ export async function notifyExpiredReservations(env: Env, limit = 5) {
     .bind(now(), limit)
     .all<ListingRow>();
   for (const l of results) {
-    const text = `⏰ Бронь лота №${l.id} (${esc(listingTitle(l))}) истекла — он снова доступен покупателям. Если телефон продан, отметьте это${l.seller_id ? ' в /my' : ': /sold ' + l.id}.`;
+    const text = `⏰ Бронь лота №${l.id} (${esc(listingTitle(l))}) истекла — он снова доступен покупателям. Если товар продан, отметьте это${l.seller_id ? ' в /my' : ': /sold ' + l.id}.`;
     if (l.seller_id) await api(env).sendMessage(l.seller_id, text, { parse_mode: 'HTML' }).catch(() => {});
     await toStaff(env, text);
   }

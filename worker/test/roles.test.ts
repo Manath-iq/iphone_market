@@ -1,22 +1,6 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import type { Env } from '../src/env';
 import { acceptInvite, createInvite, isMainOwner, isOwner, isStaff, setModActive } from '../src/roles';
-
-/** Настоящий SQLite с миграциями проекта и тонкая обёртка с методами D1, которые нужны roles.ts */
-function testEnv(): Env {
-  const db = new DatabaseSync(':memory:');
-  const dir = new URL('../migrations/', import.meta.url);
-  for (const f of readdirSync(dir).sort()) db.exec(readFileSync(new URL(f, dir), 'utf8'));
-  const prepare = (sql: string, args: unknown[] = []) => ({
-    bind: (...a: unknown[]) => prepare(sql, a),
-    first: async () => db.prepare(sql).get(...(args as never[])) ?? null,
-    all: async () => ({ results: db.prepare(sql).all(...(args as never[])) }),
-    run: async () => db.prepare(sql).run(...(args as never[])),
-  });
-  return { DB: { prepare }, ADMIN_IDS: '1' } as unknown as Env;
-}
+import { testEnv } from './d1';
 
 const MAIN = 1;
 const client = { id: 2, username: 'client' };

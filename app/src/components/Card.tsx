@@ -1,6 +1,6 @@
 import type { Listing } from '../../../shared/types';
 import { formatPrice, formatStorage } from '../../../shared/parser';
-import { batteryTone, isNew } from '../filters';
+import { batteryTone, isNew, listingName } from '../filters';
 import { Emoji } from './Emoji';
 import { Img } from './Img';
 import { IconLock } from '../icons';
@@ -38,7 +38,7 @@ export function Card({ l, onOpen, index }: { l: Listing; onOpen: (l: Listing) =>
         )}
       </div>
       <div class="card-body">
-        <div class="card-title">iPhone {l.family ?? l.model_raw}</div>
+        <div class="card-title">{listingName(l)}</div>
         {meta && <div class="card-meta">{meta}</div>}
         <div class="card-price">
           <span>{l.price_rub ? formatPrice(l.price_rub) : 'Цена по запросу'}</span>

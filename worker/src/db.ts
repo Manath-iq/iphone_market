@@ -39,6 +39,8 @@ export interface ListingRow {
   /** 1 — бронь оплачена, 0 — короткое удержание на время оплаты */
   reserve_paid: number;
   reserve_notified: number;
+  /** описание другого товара (category = 'other'), уже без контактов */
+  description: string | null;
 }
 
 export const mediaUrl = (key: string) => `/media/${key}`;
@@ -48,6 +50,8 @@ export function toListing(r: ListingRow & { cover_key?: string | null; old_price
   return {
     id: r.id,
     channel_msg_id: r.channel_msg_id,
+    category: r.category === 'other' ? 'other' : 'iphone',
+    description: r.description ?? null,
     family: r.family,
     model_raw: r.model_raw,
     storage_gb: r.storage_gb,
@@ -141,8 +145,9 @@ export async function getFacets(env: Env): Promise<Facets> {
      WHERE status = 'active' AND family IS NOT NULL GROUP BY family`,
   ).all<{ family: string; count: number }>();
   const agg = await env.DB.prepare(
-    `SELECT COUNT(*) AS total, MIN(price_rub) AS pmin, MAX(price_rub) AS pmax FROM listings WHERE status = 'active'`,
-  ).first<{ total: number; pmin: number | null; pmax: number | null }>();
+    `SELECT COUNT(*) AS total, SUM(category = 'other') AS other, MIN(price_rub) AS pmin, MAX(price_rub) AS pmax
+     FROM listings WHERE status = 'active'`,
+  ).first<{ total: number; other: number | null; pmin: number | null; pmax: number | null }>();
   const st = await env.DB.prepare(
     `SELECT DISTINCT storage_gb FROM listings WHERE status = 'active' AND storage_gb IS NOT NULL ORDER BY storage_gb`,
   ).all<{ storage_gb: number }>();
@@ -151,6 +156,7 @@ export async function getFacets(env: Env): Promise<Facets> {
   ).all<{ condition: string }>();
   return {
     total: agg?.total ?? 0,
+    other_count: agg?.other ?? 0,
     families: fam.results.sort((a, b) => familyRank(b.family) - familyRank(a.family)),
     storages: st.results.map((r) => r.storage_gb),
     conditions: cond.results.map((r) => r.condition),
