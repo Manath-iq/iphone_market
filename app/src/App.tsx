@@ -11,7 +11,7 @@ import { About } from './components/About';
 import { IconBell, IconGrid, IconStore } from './icons';
 
 type Tab = 'catalog' | 'subs' | 'about';
-const BOT_USERNAME = 'iphone_marketraxi_bot';
+const BOT_USERNAME = 'Raxi_store_bot';
 const FILTERS_KEY = 'raxi:filters';
 /** через сколько секунд после ухода из приложения перезапрашивать каталог */
 const STALE_SEC = 60;

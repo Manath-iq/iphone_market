@@ -8,11 +8,13 @@ import { addMedia, upsertPost } from './ingest';
 import { esc, notifySubscribers, sendAdminPreview, toStaff } from './notify';
 import { STORE } from './config';
 import { acceptInvite, isStaff, personLink, touchSeller, type InviteResult } from './roles';
+import { syncCommands } from './commands';
 import { registerStaff } from './bot-staff';
 import { channelKey, postUrl } from './publish';
 import { completePayment, getPayment, holdListing, preCheckout } from './payments';
 import { registerSeller, TEMPLATE_TEXT } from './bot-seller';
 import { sendWithCard } from './cards';
+import { acceptTerms, hasAcceptedTerms, termsKeyboard, termsText } from './terms';
 
 interface Deps {
   env: Env;
@@ -83,20 +85,49 @@ export function createBot({ env, origin, waitUntil }: Deps) {
       if (role === 'seller') await sendWithCard(env, ctx.chat.id, 'seller', `${inviteReply(res, role)}\n\n${TEMPLATE_TEXT}`);
       else await sendWithCard(env, ctx.chat.id, 'moderator', inviteReply(res, role));
       waitUntil(toStaff(env, `👤 ${personLink(ctx.from)} ${role === 'seller' ? 'стал продавцом' : 'стал модератором'} по приглашению.`));
+      waitUntil(syncCommands(env, ctx.from.id));
       return;
     }
-    // ссылка «Поделиться» из карточки: t.me/<бот>?start=l_12
-    const shared = ctx.match.match(/^l_(\d+)$/);
+    if (!ctx.from) return;
+    // покупатель сначала принимает условия площадки (нужно ЮKassa); что он открывал — запомним в кнопке
+    const payload = /^l_\d+$/.test(ctx.match) ? ctx.match : '';
+    if (!(await hasAcceptedTerms(env, ctx.from.id))) {
+      await ctx.reply(termsText(origin), { parse_mode: 'HTML', reply_markup: termsKeyboard(origin, payload), link_preview_options: { is_disabled: true } });
+      return;
+    }
+    await openStart(ctx.chat.id, ctx.from.id, payload);
+  });
+
+  h.callbackQuery(/^terms:ok(?::(l_\d+))?$/, async (ctx) => {
+    await acceptTerms(env, ctx.from);
+    // ответ на нажатие не обязателен: если Telegram его не примет, приветствие всё равно уйдёт
+    await ctx.answerCallbackQuery('Спасибо! Условия приняты').catch(() => {});
+    // в сообщении остаётся текст и ссылка на оферту, кнопка согласия уходит
+    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().url('📄 Условия оферты', `${origin}/oferta`) }).catch(() => {});
+    await openStart(ctx.from.id, ctx.from.id, ctx.match[1] ?? '');
+  });
+
+  h.command('oferta', (ctx) =>
+    ctx.reply(`Условия площадки ${STORE.name} — в публичной оферте.`, {
+      reply_markup: new InlineKeyboard().url('📄 Открыть оферту', `${origin}/oferta`),
+    }),
+  );
+
+  /** То, что видит покупатель после согласия: карточка из ссылки «Купить лот» или приветствие */
+  async function openStart(chatId: number, userId: number, payload: string) {
+    // ссылка «Поделиться» и «Купить лот» из канала: t.me/<бот>?start=l_12
+    const shared = payload.match(/^l_(\d+)$/);
     if (shared) {
       const l = await env.DB.prepare('SELECT * FROM listings WHERE id = ?').bind(+shared[1]).first<ListingRow>();
       if (l?.status === 'active') {
-        return ctx.reply(`📱 <b>${esc(listingTitle(l))}</b>${l.price_rub ? ' — ' + formatPrice(l.price_rub) : ''}`, {
+        await bot.api.sendMessage(chatId, `📱 <b>${esc(listingTitle(l))}</b>${l.price_rub ? ' — ' + formatPrice(l.price_rub) : ''}`, {
           parse_mode: 'HTML',
           reply_markup: new InlineKeyboard().webApp('Открыть карточку', `${origin}/?l=${l.id}`).row().webApp('Весь каталог', origin),
         });
+        return;
       }
       if (l) {
-        await ctx.reply(`${esc(listingTitle(l))} уже продан 🤷 Посмотрите, что есть сейчас:`, { reply_markup: catalogKb() });
+        await bot.api.sendMessage(chatId, `${esc(listingTitle(l))} уже продан 🤷 Посмотрите, что есть сейчас:`, { reply_markup: catalogKb() });
         return;
       }
     }
@@ -104,7 +135,7 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     const n = count?.c ?? 0;
     await sendWithCard(
       env,
-      ctx.chat.id,
+      chatId,
       'welcome',
       [
         `Здравствуйте! Это каталог <b>${STORE.name}</b> 🍏`,
@@ -119,8 +150,10 @@ export function createBot({ env, origin, waitUntil }: Deps) {
       ].join('\n'),
       new InlineKeyboard().webApp('📱 Открыть каталог', origin).row().webApp('🔔 Сообщить о поступлении', `${origin}/?tab=subs`),
     );
-    if (ctx.from && (await isStaff(env, ctx.from.id))) await ctx.reply('Команды сотрудника — /help');
-  });
+    if (await isStaff(env, userId)) await bot.api.sendMessage(chatId, 'Команды сотрудника — /help');
+    // продавцам и сотрудникам — меню их команд (после переезда на нового бота и после смены роли)
+    waitUntil(syncCommands(env, userId, false));
+  }
 
   // ——— Оплата комиссии: ЮKassa через Telegram Payments или тестовый режим ———
   h.on('pre_checkout_query', async (ctx) => {
@@ -169,6 +202,9 @@ export function createBot({ env, origin, waitUntil }: Deps) {
     // ник продавца мог смениться — а выдаём покупателю именно его
     waitUntil(touchSeller(env, ctx.from));
     if (ctx.message.text?.startsWith('/') && (await isStaff(env, ctx.from.id))) return ctx.reply('Такой команды нет. Список — /help');
+    if (!(await hasAcceptedTerms(env, ctx.from.id))) {
+      return ctx.reply(termsText(origin), { parse_mode: 'HTML', reply_markup: termsKeyboard(origin), link_preview_options: { is_disabled: true } });
+    }
     await ctx.reply('Все телефоны в наличии — в каталоге 👇', { reply_markup: catalogKb() });
   });
 

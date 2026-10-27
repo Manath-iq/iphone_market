@@ -2,7 +2,7 @@
 
 Демо по ТЗ «бот + мини-апп «Каталог RaXi Apple»»: продавец постит в канал как обычно, бот сам собирает каталог, покупатель видит только то, что в наличии.
 
-- **Бот:** [@iphone_marketraxi_bot](https://t.me/iphone_marketraxi_bot) (тестовый)
+- **Бот:** [@Raxi_store_bot](https://t.me/Raxi_store_bot)
 - **Мини-апп:** https://raxi-catalog.todominate-ai.workers.dev
 
 ## Как устроено

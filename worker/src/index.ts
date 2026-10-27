@@ -13,6 +13,7 @@ import { downloadPending, purgeSoldMedia } from './ingest';
 import { PUBLIC_ORIGIN, STORE } from './config';
 import { MANAGER_USERNAME } from '../../shared/caption';
 import { createCheckout, notifyExpiredReservations } from './payments';
+import { acceptTerms } from './terms';
 
 type Ctx = { Bindings: Env; Variables: { user: TgUser | null } };
 const app = new Hono<Ctx>();
@@ -94,6 +95,8 @@ app.post('/api/checkout', async (c) => {
   const { listing_id } = await c.req.json<{ listing_id: number }>();
   const r = await createCheckout(c.env, +listing_id, user);
   if (!r.ok) return c.json({ error: r.error, message: CHECKOUT_ERRORS[r.error] }, 409);
+  // «Оплатить» нажимают под текстом «Переходя к оплате, вы соглашаетесь с условиями оферты» — это тоже согласие
+  c.executionCtx.waitUntil(acceptTerms(c.env, user));
   return c.json(r);
 });
 

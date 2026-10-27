@@ -42,7 +42,7 @@ type = "worker"
 crons = ["0 * * * *", "0 7 * * 1"]
 
 [vars]
-BOT_USERNAME = "iphone_marketraxi_bot"
+BOT_USERNAME = "Raxi_store_bot"
 # DEMO: разрешить чтение каталога без initData, чтобы ссылку можно было открыть и в браузере
 PUBLIC_READ = "1"
 

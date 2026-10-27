@@ -5,6 +5,7 @@ import { now } from './env';
 import type { ListingRow } from './db';
 import { api, esc, notifySubscribers, sendAlbum, statsText } from './notify';
 import { createInvite, isOwner, isStaff, listMods, listSellers, personLink, setModActive, setSellerStatus } from './roles';
+import { syncCommands } from './commands';
 import { getSettings, setSetting } from './settings';
 import { clearState, getState, setState } from './state';
 import { getSubmission, getSubmissionMedia, moveStatus, parsedOf, type SubmissionRow } from './submissions';
@@ -248,6 +249,7 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
   h.callbackQuery(/^s(on|off):(\d+)$/, async (ctx) => {
     if (!isOwner(env, ctx.from.id)) return ctx.answerCallbackQuery();
     const s = await setSellerStatus(env, +ctx.match[2], ctx.match[1] === 'on' ? 'active' : 'blocked');
+    waitUntil(syncCommands(env, +ctx.match[2]));
     await ctx.answerCallbackQuery(s ? (s.status === 'active' ? 'Продавец включён' : 'Продавец отключён') : 'Не найден');
     const { text, kb } = await sellersView(env);
     await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb }).catch(() => {});
@@ -263,6 +265,7 @@ export function registerStaff(h: Composer<Context>, { env, origin, waitUntil }: 
   h.callbackQuery(/^m(on|off):(\d+)$/, async (ctx) => {
     if (!isOwner(env, ctx.from.id)) return ctx.answerCallbackQuery();
     const m = await setModActive(env, +ctx.match[2], ctx.match[1] === 'on');
+    waitUntil(syncCommands(env, +ctx.match[2]));
     await ctx.answerCallbackQuery(m ? (m.active ? 'Модератор включён' : 'Модератор отключён') : 'Не найден');
     const { text, kb } = await modsView(env);
     await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb }).catch(() => {});
